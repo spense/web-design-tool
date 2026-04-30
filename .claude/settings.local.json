@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm --prefix backend install)",
+      "Bash(npm --prefix frontend install)",
+      "Bash(curl -s http://localhost:3001/api/config)",
+      "Bash(curl -s http://localhost:3001/api/projects)",
+      "Bash(curl -s http://localhost:3001/api/app-state)",
+      "Bash(curl -s -o /tmp/wdt-index.html -w \"%{http_code}\" http://localhost:5173/)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' http://localhost:5173__TRACKED_VAR__)",
+      "Bash(kill 92851 92881)",
+      "Bash(pkill -f \"node --watch server.js\")",
+      "Bash(pkill -f \"vite\")"
+    ]
+  }
+}
