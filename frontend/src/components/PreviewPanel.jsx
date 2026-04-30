@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import Spinner from './Spinner.jsx';
 
 const VIEWPORTS = {
   desktop: { label: 'Desktop', width: '100%' },
@@ -44,6 +45,15 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     try { await navigator.clipboard.writeText(html); } catch {}
   };
 
+  const openFullScreen = () => {
+    if (!html) return;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, '_blank', 'noopener,noreferrer');
+    // Revoke after the new tab has had time to load
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
   return (
     <div className="preview-panel">
       <div className="preview-toolbar">
@@ -81,9 +91,10 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
           </div>
         </div>
         <div className="right">
+          <button onClick={openFullScreen} disabled={!html} title="Open in new browser tab">Full screen ↗</button>
           <button onClick={copyHtml} disabled={!html}>Copy HTML</button>
           <button className="primary" onClick={onExport} disabled={!html || exporting}>
-            {exporting ? 'Exporting…' : 'Export'}
+            {exporting ? <><Spinner /> Exporting…</> : 'Export'}
           </button>
         </div>
       </div>

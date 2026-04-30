@@ -12,7 +12,8 @@
       "Bash(curl -s -o /dev/null -w '%{http_code}' http://localhost:5173__TRACKED_VAR__)",
       "Bash(kill 92851 92881)",
       "Bash(pkill -f \"node --watch server.js\")",
-      "Bash(pkill -f \"vite\")"
+      "Bash(pkill -f \"vite\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/styles.css)"
     ]
   }
 }

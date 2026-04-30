@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { streamChat, api } from '../api.js';
 import { parseFileBlocks, detectUrl } from '../parseFiles.js';
+import Spinner from './Spinner.jsx';
 
 const MODELS = [
   { value: 'sonnet', label: 'Sonnet 4.6' },
@@ -129,7 +130,11 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
         {messages.map((m, i) => <Message key={i} msg={m} />)}
         {crawling && <div className="chat-msg system"><div className="body">Crawling…</div></div>}
         {streaming && (
-          <Message msg={{ role: 'assistant', content: previewProse(streamingText), model, streaming: true }} />
+          <StreamingMessage
+            text={streamingText}
+            model={model}
+            isUpdate={Object.keys(pages || {}).length > 0}
+          />
         )}
       </div>
       <div className="chat-input">
@@ -154,12 +159,24 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   );
 }
 
-function previewProse(text) {
-  // Show prose stream, replacing any started <!-- FILE: --> block with a placeholder
+function StreamingMessage({ text, model, isUpdate }) {
   const idx = text.search(/<!--\s*FILE:/i);
-  if (idx === -1) return text;
-  const before = text.slice(0, idx).trim();
-  return (before ? before + '\n\n' : '') + '⟨generating HTML…⟩';
+  const proseOnly = idx === -1 ? text : text.slice(0, idx).trim();
+  const generating = idx !== -1;
+  const label = isUpdate ? 'Updating design' : 'Generating design';
+  return (
+    <div className="chat-msg assistant">
+      <div className="who">assistant · {model} · streaming</div>
+      <div className="body">
+        {proseOnly}
+        {generating && (
+          <span className="gen-status" style={{ marginTop: proseOnly ? 8 : 0, display: 'flex' }}>
+            <Spinner /> {label}…
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function Message({ msg }) {
