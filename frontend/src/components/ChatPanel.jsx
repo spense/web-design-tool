@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { streamChat, api } from '../api.js';
-import { parseFileBlocks, detectUrl, htmlStartIndex } from '../parseFiles.js';
+import { parseFileBlocks, detectUrl, generationStartIndex } from '../parseFiles.js';
+import { parsePatchBlocks, applyPatches, editStartIndex } from '../parsePatch.js';
 import Spinner from './Spinner.jsx';
 
 const MODELS = [
@@ -30,7 +31,6 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     let updatedProject = project;
     let crawlMessage = null;
 
-    // Crawl if URL detected and we haven't already crawled (or it's a new URL)
     if (url && project.crawledUrl !== url) {
       setCrawling(true);
       try {
@@ -58,19 +58,17 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     if (crawlMessage) newMessages.push(crawlMessage);
     newMessages.push(userMsg);
 
-    // Save user message immediately so it shows up
     onUpdate(undefined, newMessages, updatedProject);
 
-    // Build API-shape message history (drop system messages, keep only user/assistant)
     const apiMessages = newMessages
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : String(m.content) }));
 
     setStreaming(true);
     setStreamingText('');
-    let fullText = '';
+    let result;
     try {
-      fullText = await streamChat({
+      result = await streamChat({
         model,
         messages: apiMessages,
         context: {
@@ -88,33 +86,70 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       return;
     }
 
-    // Parse files out of the full response
-    const { files, prose } = parseFileBlocks(fullText);
-    const fileCount = Object.keys(files).length;
+    const fullText = result.text;
+    const usage = result.usage;
+
+    // Try patches first; if any present, apply to existing pages.
+    const { edits, prose: patchProse } = parsePatchBlocks(fullText);
+    const editFiles = Object.keys(edits);
+
+    // Then look for full FILE blocks (new files / wholesale rewrites).
+    const { files, prose: fileProse } = parseFileBlocks(fullText);
+    const fileNames = Object.keys(files);
+
+    let updatedPages = { ...pages, ...files };
+    let appliedSummary = [];
+    const failureMessages = [];
+
+    if (editFiles.length > 0) {
+      const result = applyPatches(updatedPages, edits);
+      updatedPages = result.updatedPages;
+      for (const [name, count] of Object.entries(result.applied)) {
+        appliedSummary.push(`${name} (${count} edit${count === 1 ? '' : 's'})`);
+      }
+      if (result.failed.length > 0) {
+        const failed = result.failed.map(f => `  • ${f.filename}: ${f.reason === 'not_found' ? 'file not found' : "couldn't find SEARCH block"}`).join('\n');
+        failureMessages.push({
+          role: 'system',
+          content: `Patch failed for:\n${failed}\n\nAsk me to try again, or request a full rewrite of the affected file(s).`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    if (fileNames.length > 0) {
+      const wroteNew = fileNames.filter(n => !pages[n]);
+      const wroteUpdated = fileNames.filter(n => pages[n]);
+      if (wroteNew.length) appliedSummary.push(`new: ${wroteNew.join(', ')}`);
+      if (wroteUpdated.length) appliedSummary.push(`rewrote: ${wroteUpdated.join(', ')}`);
+    }
+
+    // Pick whichever prose we got (patch-mode prose if there are patches, else file-mode prose).
+    const prose = editFiles.length > 0 ? patchProse : fileProse;
     let displayContent = prose;
     if (!displayContent) {
-      displayContent = fileCount > 0
+      const didSomething = editFiles.length > 0 || fileNames.length > 0;
+      displayContent = didSomething
         ? (Object.keys(pages).length > 0 ? 'Design updated.' : 'Design generated.')
         : '(empty response)';
     }
+
     const assistantMsg = {
       role: 'assistant',
       content: displayContent,
       model,
       timestamp: new Date().toISOString(),
-      files: Object.keys(files),
+      files: appliedSummary,
+      usage,
     };
-    const finalMessages = [...newMessages, assistantMsg];
-
-    // Merge new files into existing pages
-    const newPages = { ...pages, ...files };
+    const finalMessages = [...newMessages, assistantMsg, ...failureMessages];
 
     const finalProject = {
       ...updatedProject,
       modelHistory: [...(updatedProject.modelHistory || []), { model, at: new Date().toISOString() }],
     };
 
-    onUpdate(newPages, finalMessages, finalProject);
+    onUpdate(updatedPages, finalMessages, finalProject);
     setStreaming(false);
     setStreamingText('');
   };
@@ -167,10 +202,16 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
 }
 
 function StreamingMessage({ text, model, isUpdate }) {
-  const idx = htmlStartIndex(text);
+  const editIdx = editStartIndex(text);
+  const genIdx = generationStartIndex(text);
+  const idx = genIdx;
   const proseOnly = idx === -1 ? text : text.slice(0, idx).trim();
   const generating = idx !== -1;
-  const label = isUpdate ? 'Updating design' : 'Generating design';
+  // Pick label: EDIT mode → "Applying edits"; otherwise generate vs update.
+  let label;
+  if (editIdx !== -1) label = 'Applying edits';
+  else if (isUpdate) label = 'Updating design';
+  else label = 'Generating design';
   return (
     <div className="chat-msg assistant">
       <div className="who">assistant · {model} · streaming</div>
@@ -187,14 +228,23 @@ function StreamingMessage({ text, model, isUpdate }) {
 }
 
 function Message({ msg }) {
+  const cacheRead = msg.usage?.cache_read_input_tokens || 0;
+  const cacheWrite = msg.usage?.cache_creation_input_tokens || 0;
   return (
     <div className={`chat-msg ${msg.role}`}>
       <div className="who">
-        {msg.role}{msg.model ? ` · ${msg.model}` : ''}{msg.streaming ? ' · streaming' : ''}
+        {msg.role}{msg.model ? ` · ${msg.model}` : ''}
       </div>
       <div className="body">{msg.content}</div>
       {msg.files?.length > 0 && (
         <div className="crawl-info">Updated: {msg.files.join(', ')}</div>
+      )}
+      {msg.usage && (
+        <div className="crawl-info" style={{ borderLeftColor: 'var(--text-faint)' }}>
+          {msg.usage.input_tokens} in · {msg.usage.output_tokens} out
+          {cacheRead > 0 && ` · ${cacheRead} cached ✓`}
+          {cacheWrite > 0 && ` · ${cacheWrite} cache write`}
+        </div>
       )}
     </div>
   );

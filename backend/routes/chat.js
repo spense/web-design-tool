@@ -10,18 +10,30 @@ router.post('/', async (req, res, next) => {
     const { model, messages, context } = req.body || {};
     const client = getAnthropic();
 
-    let systemPrompt = SYSTEM_PROMPT;
+    // Split system into a CACHED prefix (system prompt + crawl data — stable
+    // within a project) and an UNCACHED suffix (active page + current pages —
+    // changes every turn).
+    let cachedSystem = SYSTEM_PROMPT;
     if (context?.crawledData) {
-      systemPrompt += `\n\n--- INTAKE DATA (crawled from ${context.crawledData.startUrl}) ---\n${JSON.stringify(context.crawledData, null, 2)}`;
+      cachedSystem += `\n\n--- INTAKE DATA (crawled from ${context.crawledData.startUrl}) ---\n${JSON.stringify(context.crawledData, null, 2)}`;
     }
+
+    let dynamicSystem = '';
     if (context?.activePage) {
-      systemPrompt += `\n\n--- ACTIVE CONTEXT ---\nThe user is currently viewing "${context.activePage}" in the design preview. If they ask for changes without specifying a page, assume they mean this page.`;
+      dynamicSystem += `\n\n--- ACTIVE CONTEXT ---\nThe user is currently viewing "${context.activePage}" in the design preview. If they ask for changes without specifying a page, assume they mean this page.`;
     }
     if (context?.currentPages && Object.keys(context.currentPages).length > 0) {
-      systemPrompt += `\n\n--- CURRENT DESIGN ---\nThe project currently contains these files: ${Object.keys(context.currentPages).join(', ')}.\nWhen iterating, output the COMPLETE updated HTML for any file you change. You may include the full current HTML below for reference:\n`;
+      dynamicSystem += `\n\n--- CURRENT DESIGN ---\nThe project currently contains these files: ${Object.keys(context.currentPages).join(', ')}.\nWhen iterating with PATCH MODE, your SEARCH blocks must be byte-exact matches against the file contents below.\n`;
       for (const [name, content] of Object.entries(context.currentPages)) {
-        systemPrompt += `\n<!-- CURRENT FILE: ${name} -->\n${content}\n`;
+        dynamicSystem += `\n<!-- CURRENT FILE: ${name} -->\n${content}\n`;
       }
+    }
+
+    const systemBlocks = [
+      { type: 'text', text: cachedSystem, cache_control: { type: 'ephemeral' } },
+    ];
+    if (dynamicSystem) {
+      systemBlocks.push({ type: 'text', text: dynamicSystem });
     }
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -29,10 +41,10 @@ router.post('/', async (req, res, next) => {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders?.();
 
-    const stream = await client.messages.stream({
+    const stream = client.messages.stream({
       model: resolveModel(model),
       max_tokens: 16000,
-      system: systemPrompt,
+      system: systemBlocks,
       messages,
     });
 
@@ -45,10 +57,26 @@ router.post('/', async (req, res, next) => {
       res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
       res.end();
     });
-    stream.on('end', () => {
-      res.write(`event: done\ndata: ${JSON.stringify({ text: fullText })}\n\n`);
+
+    try {
+      const finalMessage = await stream.finalMessage();
+      const usage = finalMessage.usage || {};
+      const stats = {
+        text: fullText,
+        usage: {
+          input_tokens: usage.input_tokens ?? 0,
+          output_tokens: usage.output_tokens ?? 0,
+          cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+          cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+        },
+      };
+      console.log(`[chat] model=${resolveModel(model)} in=${stats.usage.input_tokens} out=${stats.usage.output_tokens} cache_write=${stats.usage.cache_creation_input_tokens} cache_read=${stats.usage.cache_read_input_tokens}`);
+      res.write(`event: done\ndata: ${JSON.stringify(stats)}\n\n`);
       res.end();
-    });
+    } catch (err) {
+      // error already sent via stream.on('error') above; ensure response closes
+      if (!res.writableEnded) res.end();
+    }
 
     req.on('close', () => {
       try { stream.controller?.abort(); } catch {}

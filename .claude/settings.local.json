@@ -16,7 +16,12 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/styles.css)",
       "Bash(curl -s -v http://localhost:5173/)",
       "Bash(node --check backend/parseFiles.js)",
-      "Bash(node --input-type=module -e \"import\\('./frontend/src/parseFiles.js'\\).then\\(m => console.log\\('frontend/parseFiles.js OK, exports:', Object.keys\\(m\\).join\\(','\\)\\)\\).catch\\(e => { console.error\\(e\\); process.exit\\(1\\); }\\)\")"
+      "Bash(node --input-type=module -e \"import\\('./frontend/src/parseFiles.js'\\).then\\(m => console.log\\('frontend/parseFiles.js OK, exports:', Object.keys\\(m\\).join\\(','\\)\\)\\).catch\\(e => { console.error\\(e\\); process.exit\\(1\\); }\\)\")",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
+      "Bash(node --check backend/anthropic.js)",
+      "Bash(node --check backend/routes/chat.js)"
     ]
   }
 }
