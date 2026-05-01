@@ -144,6 +144,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .chat-panel {
   width: 25%;
   min-width: 300px;
+  max-width: 480px;
   display: flex;
   flex-direction: column;
   background: var(--bg-elev);
