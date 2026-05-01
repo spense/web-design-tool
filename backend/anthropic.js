@@ -87,6 +87,12 @@ Page structure:
 - Default to a single-page design (all sections on index.html) unless the user specifies otherwise
 - For multi-page: each page is a standalone full document with consistent nav/header/footer
 
+What NOT to include in the HTML:
+- No "Design Overview", "Design Notes", "About this Design", "Style Guide", "Color Palette", or any other meta-commentary section explaining the design itself. The rendered page is the deliverable, not documentation about it.
+- No comments inside the HTML describing your design choices ("<!-- using blue for trust -->" etc.). The HTML should look like a real production site, not an annotated exercise.
+- No author/AI/tool attribution anywhere in the page (no "Designed by Claude", no "Generated with X", etc.).
+- Design rationale belongs in the chat prose accompanying the response, not embedded in the page.
+
 # Prose
 
 Put any commentary BEFORE or AFTER the FILE/EDIT blocks, never inside them. Keep commentary brief — one to three sentences explaining what changed and why. The user can see the design; don't narrate it.`;

@@ -21,7 +21,8 @@
       "Skill(claude-api:*)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
       "Bash(node --check backend/anthropic.js)",
-      "Bash(node --check backend/routes/chat.js)"
+      "Bash(node --check backend/routes/chat.js)",
+      "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/anthropic.js)"
     ]
   }
 }
