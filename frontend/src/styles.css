@@ -247,8 +247,10 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 
 /* Preview */
 .preview-toolbar {
+  position: relative;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
@@ -261,11 +263,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   gap: 8px;
 }
 .preview-toolbar .center {
-  flex: 1;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   justify-content: center;
   gap: 4px;
+  pointer-events: none;
 }
+.preview-toolbar .center > * { pointer-events: auto; }
 .viewport-toggle {
   display: flex;
   background: var(--bg);
