@@ -47,6 +47,8 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 button.primary { background-color: var(--accent); color: var(--accent-on); border-color: var(--accent); font-weight: 600; }
 button.primary:hover { background-color: var(--accent-hover); border-color: var(--accent-hover); }
 button.ghost { background-color: transparent; }
+button.danger { background-color: var(--danger); color: #1a0a0a; border-color: var(--danger); font-weight: 600; }
+button.danger:hover { background-color: #e69191; border-color: #e69191; }
 
 input, textarea, select {
   font: inherit;

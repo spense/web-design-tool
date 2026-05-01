@@ -21,6 +21,23 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   const panelRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+  const abortRef = useRef(null);
+  // Snapshot of messages before the current send, so an abort can roll back.
+  const preSendMessagesRef = useRef(null);
+  const preSendProjectRef = useRef(null);
+
+  const stopStream = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStreaming(false);
+    setStreamingText('');
+    // Roll back the user message that was added before the request started.
+    if (preSendMessagesRef.current) {
+      onUpdate(undefined, preSendMessagesRef.current, preSendProjectRef.current);
+      preSendMessagesRef.current = null;
+      preSendProjectRef.current = null;
+    }
+  };
 
   const handleAttach = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -125,6 +142,10 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     if (crawlMessage) newMessages.push(crawlMessage);
     newMessages.push(userMsg);
 
+    // Snapshot pre-send state in case the user aborts.
+    preSendMessagesRef.current = messages;
+    preSendProjectRef.current = project;
+
     onUpdate(undefined, newMessages, updatedProject);
 
     // Clear attachments now that they're committed to this turn.
@@ -146,6 +167,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     setStreaming(true);
     setStreamingText('');
     let result;
+    abortRef.current = new AbortController();
     try {
       result = await streamChat({
         model,
@@ -156,13 +178,22 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           currentPages: pages,
         },
         onDelta: (_d, full) => setStreamingText(full),
+        signal: abortRef.current.signal,
       });
     } catch (e) {
+      // User-initiated abort: stopStream() already rolled back state.
+      if (e.name === 'AbortError' || abortRef.current?.signal.aborted) {
+        return;
+      }
       const errMsg = { role: 'system', content: `Error: ${e.message}`, timestamp: new Date().toISOString() };
       onUpdate(undefined, [...newMessages, errMsg], updatedProject);
       setStreaming(false);
       setStreamingText('');
       return;
+    } finally {
+      abortRef.current = null;
+      preSendMessagesRef.current = null;
+      preSendProjectRef.current = null;
     }
 
     const fullText = result.text;
@@ -307,9 +338,15 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
             Attach
           </button>
           <span className="spacer" />
-          <button className="primary" onClick={send} disabled={(!input.trim() && attachments.length === 0) || streaming || !hasApiKey}>
-            {streaming ? 'Generating…' : 'Send'}
-          </button>
+          {streaming ? (
+            <button className="danger" onClick={stopStream}>
+              <StopIcon /> Stop
+            </button>
+          ) : (
+            <button className="primary" onClick={send} disabled={(!input.trim() && attachments.length === 0) || !hasApiKey}>
+              <SendIcon /> Send
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -392,6 +429,22 @@ function buildUserContent(text, attachments) {
     // image-ref handled above; old 'image' kind no longer used
   }
   return blocks;
+}
+
+function SendIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 2L11 13" />
+      <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+    </svg>
+  );
+}
+function StopIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
 }
 
 function readAsBase64(file) {
