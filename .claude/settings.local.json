@@ -24,7 +24,8 @@
       "Bash(node --check backend/routes/chat.js)",
       "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/anthropic.js)",
       "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/storage.js)",
-      "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/routes/projects.js)"
+      "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/routes/projects.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/components/PreviewPanel.jsx)"
     ]
   }
 }

@@ -88,24 +88,26 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     <div className="preview-panel">
       <div className="preview-toolbar">
         <div className="left">
-          <div className="page-dropdown" ref={pageDropdownRef}>
-            <button onClick={() => setPageMenuOpen(o => !o)} disabled={pageNames.length === 0}>
-              {activePage || 'No pages'} {pageNames.length > 1 ? '▾' : ''}
-            </button>
-            {pageMenuOpen && pageNames.length > 0 && (
-              <div className="page-dropdown-list">
-                {pageNames.map(name => (
-                  <button
-                    key={name}
-                    className={name === activePage ? 'active' : ''}
-                    onClick={() => { onActivePage(name); setPageMenuOpen(false); }}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          {pageNames.length > 1 && (
+            <div className="page-dropdown" ref={pageDropdownRef}>
+              <button onClick={() => setPageMenuOpen(o => !o)}>
+                {activePage} ▾
+              </button>
+              {pageMenuOpen && (
+                <div className="page-dropdown-list">
+                  {pageNames.map(name => (
+                    <button
+                      key={name}
+                      className={name === activePage ? 'active' : ''}
+                      onClick={() => { onActivePage(name); setPageMenuOpen(false); }}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="tools-wrap">
             <button onClick={() => setToolsOpen(o => !o)} disabled={!html} title="Theme tools">
               Tools ▾

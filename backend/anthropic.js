@@ -146,8 +146,20 @@ Visual & content:
 - Contact form fields: name, phone, email, message, submit
 
 Page structure:
-- Default to a single-page design (all sections on index.html) unless the user specifies otherwise
-- For multi-page: each page is a standalone full document with consistent nav/header/footer
+- Default to a single-page design (all sections on index.html) unless the user specifies otherwise.
+- For multi-page designs, EVERY generated page must be a complete, content-rich document. Never emit a stub, placeholder, or near-empty shell page. If a nav links to a page, that page must exist AND must be fully designed. Specifically:
+  - Every page is a full \`<!DOCTYPE html>\` document with the same nav/header/footer markup as index.html.
+  - Every page contains the exact same \`:root { ... }\` design tokens block — themes must apply consistently across pages.
+  - Every page imports the same Google Fonts \`<link>\` tag.
+  - Each page's BODY content is purpose-appropriate for its filename:
+    - \`about.html\` → about/story, team or owner bio, values, certifications, why-us, plus a CTA back to home or contact
+    - \`services.html\` → full breakdown of every service with descriptions, pricing or "request quote", plus CTA
+    - \`contact.html\` → full contact form (name, phone, email, message, submit), business hours, address, phone number, service area, map placeholder image
+    - \`gallery.html\` / \`portfolio.html\` → image grid with placeholders, captions, CTA
+    - \`pricing.html\` → pricing tiers/cards, FAQ, CTA
+    - Any other page → real, substantial content fitting the page's purpose
+  - Page titles (\`<title>\`) and meta descriptions must differ per page.
+  - Use the same color, spacing, and typography rules — no design drift between pages.
 
 Navigation menu — pick ONE style and follow its rules strictly:
 
