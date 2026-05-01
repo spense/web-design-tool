@@ -26,7 +26,10 @@
       "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/storage.js)",
       "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/routes/projects.js)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/components/PreviewPanel.jsx)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/components/ChatPanel.jsx)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/components/ChatPanel.jsx)",
+      "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/server.js)",
+      "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/routes/uploads.js)",
+      "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/routes/export.js)"
     ]
   }
 }

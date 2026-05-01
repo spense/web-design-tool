@@ -32,21 +32,21 @@ body {
 button {
   font: inherit;
   color: inherit;
-  background: var(--bg-elev-2);
+  background-color: var(--bg-elev-2);
   border: 1px solid var(--border);
   border-radius: var(--pill);
   padding: 6px 14px;
   cursor: pointer;
-  transition: background 0.1s, border-color 0.1s, color 0.1s;
+  transition: background-color 0.1s, border-color 0.1s, color 0.1s;
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-button:hover { background: var(--border); border-color: var(--border-strong); }
+button:hover { background-color: var(--border); border-color: var(--border-strong); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
-button.primary { background: var(--accent); color: var(--accent-on); border-color: var(--accent); font-weight: 600; }
-button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-button.ghost { background: transparent; }
+button.primary { background-color: var(--accent); color: var(--accent-on); border-color: var(--accent); font-weight: 600; }
+button.primary:hover { background-color: var(--accent-hover); border-color: var(--accent-hover); }
+button.ghost { background-color: transparent; }
 
 input, textarea, select {
   font: inherit;
@@ -229,23 +229,90 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   flex-direction: column;
   gap: 8px;
 }
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chat-attachment-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  padding: 3px 4px 3px 10px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  max-width: 100%;
+}
+.chat-attachment-pill .kind { font-size: 11px; line-height: 1; }
+.chat-attachment-pill .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-attachment-pill .remove {
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-faint);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+}
+.chat-attachment-pill .remove:hover {
+  background: var(--border);
+  color: var(--text);
+}
 .chat-input textarea {
   resize: none;
-  min-height: 60px;
+  min-height: 120px;
   font-family: var(--sans);
   font-size: 13.5px;
   line-height: 1.5;
+  background: var(--bg);
+  border: none;
 }
+.chat-input textarea:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
 .chat-input-row {
   display: flex;
   gap: 8px;
   align-items: center;
-}
-.chat-input-row select {
   font-size: 12px;
-  padding: 4px 12px;
 }
 .chat-input-row .spacer { flex: 1; }
+.chat-input-row select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  background-color: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  padding: 6px 28px 6px 14px;
+  color: var(--text);
+  transition: background-color 0.1s, border-color 0.1s;
+}
+.chat-input-row select:hover {
+  background-color: var(--border);
+  border-color: var(--border-strong);
+}
+
+/* Custom SVG caret used on selects and "menu trigger" buttons. */
+.with-caret,
+.chat-input-row select,
+.tools-select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238a93a6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.with-caret { padding-right: 28px; }
 
 /* Preview */
 .preview-toolbar {

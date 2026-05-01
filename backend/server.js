@@ -14,6 +14,7 @@ import crawlRouter from './routes/crawl.js';
 import exportRouter from './routes/export.js';
 import importRouter from './routes/import.js';
 import appStateRouter from './routes/appState.js';
+import uploadsRouter from './routes/uploads.js';
 import { ensureProjectsDir } from './storage.js';
 
 const app = express();
@@ -26,6 +27,9 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// Uploads mounted FIRST under /api/projects so its routes (which match
+// /:slug/uploads and /:slug/uploads/:filename) take precedence.
+app.use('/api/projects', uploadsRouter);
 app.use('/api/projects', projectsRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/crawl', crawlRouter);

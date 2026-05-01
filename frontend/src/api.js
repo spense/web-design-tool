@@ -37,6 +37,17 @@ export const api = {
   },
   getAppState: () => jsonReq('GET', '/app-state'),
   saveAppState: (state) => jsonReq('PUT', '/app-state', state),
+  uploadAsset: async (slug, file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${API}/projects/${slug}/uploads`, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    return res.json();
+  },
+  uploadUrl: (slug, filename) => `${API}/projects/${slug}/uploads/${encodeURIComponent(filename)}`,
 };
 
 // Streaming chat: calls onDelta(chunk) and resolves with full text on done.
@@ -44,7 +55,7 @@ export async function streamChat({ model, messages, context, onDelta, signal }) 
   const res = await fetch(API + '/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, context }),
+    body: JSON.stringify({ model, messages, context }), // messages may contain structured content arrays
     signal,
   });
   if (!res.ok || !res.body) {

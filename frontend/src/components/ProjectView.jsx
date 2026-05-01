@@ -81,6 +81,7 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey }) {
         hasApiKey={hasApiKey}
       />
       <PreviewPanel
+        slug={tab.slug}
         pages={data.pages}
         activePage={activePage}
         onActivePage={setActivePage}

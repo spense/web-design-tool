@@ -16,9 +16,52 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [crawling, setCrawling] = useState(false);
+  const [attachments, setAttachments] = useState([]); // [{id, name, kind, mediaType, data}]
   const messagesRef = useRef(null);
   const panelRef = useRef(null);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const handleAttach = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ''; // allow re-selecting the same file
+    const newOnes = [];
+    for (const file of files) {
+      const isImage = file.type.startsWith('image/');
+      const isText = file.type.startsWith('text/') || /\.(txt|html?|md)$/i.test(file.name);
+      if (!isImage && !isText) continue;
+      try {
+        if (isImage) {
+          // Upload to backend; reference by filename instead of sending bytes to API.
+          const meta = await api.uploadAsset(project.slug, file);
+          newOnes.push({
+            id: Math.random().toString(36).slice(2, 10),
+            name: meta.filename,           // canonical (sanitized) filename on disk
+            displayName: file.name,
+            kind: 'image-ref',
+            mediaType: meta.mediaType,
+            sizeBytes: meta.sizeBytes,
+          });
+        } else {
+          // Text/HTML: still inline content into the API call so the model can read it.
+          const data = await readAsText(file);
+          newOnes.push({
+            id: Math.random().toString(36).slice(2, 10),
+            name: file.name,
+            kind: 'text',
+            mediaType: file.type || 'text/plain',
+            data,
+          });
+        }
+      } catch (err) {
+        console.error('attach failed', err);
+        alert(`Couldn't attach ${file.name}: ${err.message}`);
+      }
+    }
+    if (newOnes.length) setAttachments(a => [...a, ...newOnes]);
+  };
+
+  const removeAttachment = (id) => setAttachments(a => a.filter(x => x.id !== id));
 
   useEffect(() => {
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight });
@@ -67,16 +110,38 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       }
     }
 
-    const userMsg = { role: 'user', content: text, model, timestamp: new Date().toISOString() };
+    // Build the LIVE user message content (sent to API). May be a structured
+    // array if attachments are present.
+    const liveContent = buildUserContent(text, attachments);
+
+    // Saved-to-history version: just the prompt text + a small note about
+    // what was attached. We don't persist base64 image data in session.json.
+    const savedContent = attachments.length > 0
+      ? `${text}\n\n[Attached: ${attachments.map(a => a.name).join(', ')}]`
+      : text;
+
+    const userMsg = { role: 'user', content: savedContent, model, timestamp: new Date().toISOString() };
     const newMessages = [...messages];
     if (crawlMessage) newMessages.push(crawlMessage);
     newMessages.push(userMsg);
 
     onUpdate(undefined, newMessages, updatedProject);
 
+    // Clear attachments now that they're committed to this turn.
+    const sentAttachments = attachments;
+    setAttachments([]);
+
+    // History messages stay as plain text strings; only the latest user
+    // message uses structured content (so attachments hit the API).
     const apiMessages = newMessages
       .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : String(m.content) }));
+      .map((m, i, arr) => {
+        const isLast = i === arr.length - 1;
+        if (isLast && m.role === 'user' && Array.isArray(liveContent)) {
+          return { role: m.role, content: liveContent };
+        }
+        return { role: m.role, content: typeof m.content === 'string' ? m.content : String(m.content) };
+      });
 
     setStreaming(true);
     setStreamingText('');
@@ -194,6 +259,22 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
         )}
       </div>
       <div className="chat-input">
+        {attachments.length > 0 && (
+          <div className="chat-attachments">
+            {attachments.map(a => (
+              <div key={a.id} className="chat-attachment-pill" title={a.displayName || a.name}>
+                <span className="kind">{(a.kind === 'image-ref' || a.kind === 'image') ? '🖼' : '📄'}</span>
+                <span className="name">{truncateName(a.displayName || a.name)}</span>
+                <button
+                  className="remove"
+                  onClick={() => removeAttachment(a.id)}
+                  disabled={streaming}
+                  aria-label={`Remove ${a.name}`}
+                >×</button>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={input}
@@ -201,6 +282,14 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           onKeyDown={handleKey}
           placeholder={hasApiKey ? "Describe a change, or paste a URL… (Cmd+Enter to send)" : "Set ANTHROPIC_API_KEY in .env first"}
           disabled={!hasApiKey || streaming}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,.txt,.html,.htm,.md,text/plain,text/html"
+          style={{ display: 'none' }}
+          onChange={handleAttach}
         />
         <div className="chat-input-row">
           <select
@@ -214,8 +303,11 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           >
             {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
+          <button onClick={() => fileInputRef.current?.click()} disabled={streaming || !hasApiKey} title="Attach images or text files">
+            Attach
+          </button>
           <span className="spacer" />
-          <button className="primary" onClick={send} disabled={!input.trim() || streaming || !hasApiKey}>
+          <button className="primary" onClick={send} disabled={(!input.trim() && attachments.length === 0) || streaming || !hasApiKey}>
             {streaming ? 'Generating…' : 'Send'}
           </button>
         </div>
@@ -271,4 +363,58 @@ function Message({ msg }) {
       )}
     </div>
   );
+}
+
+// Build an Anthropic content array from prompt text + attachments.
+// Returns a plain string when there are no attachments (to keep simple turns simple).
+function buildUserContent(text, attachments) {
+  if (!attachments || attachments.length === 0) return text;
+  const blocks = [];
+  if (text.trim()) blocks.push({ type: 'text', text });
+
+  // Group image references into a single concise note so the model knows what to use.
+  const imageRefs = attachments.filter(a => a.kind === 'image-ref');
+  if (imageRefs.length > 0) {
+    const list = imageRefs.map(a => `- uploads/${a.name} (${a.mediaType})`).join('\n');
+    blocks.push({
+      type: 'text',
+      text: `The user has attached the following image asset(s) to this project. Use them in the design with \`<img src="uploads/FILENAME">\` paths exactly as shown — do not embed base64 or use any other path. The frontend resolves these paths automatically.\n\n${list}`,
+    });
+  }
+
+  for (const a of attachments) {
+    if (a.kind === 'text') {
+      blocks.push({
+        type: 'text',
+        text: `--- Attached file: ${a.name} ---\n${a.data}\n--- End of ${a.name} ---`,
+      });
+    }
+    // image-ref handled above; old 'image' kind no longer used
+  }
+  return blocks;
+}
+
+function readAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const result = r.result; // data:image/...;base64,XXXX
+      const idx = String(result).indexOf(',');
+      resolve(idx >= 0 ? String(result).slice(idx + 1) : String(result));
+    };
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+function readAsText(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsText(file);
+  });
+}
+function truncateName(name, max = 40) {
+  if (name.length <= max) return name;
+  return name.slice(0, max - 3) + '…';
 }

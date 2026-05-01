@@ -46,9 +46,31 @@ router.post('/:slug', async (req, res, next) => {
       await fs.writeFile(path.join(exportDir, name), content, 'utf8');
     }
 
+    // Copy uploads/ folder into the export so `<img src="uploads/...">` paths
+    // resolve in the unpacked zip.
+    const uploadsDir = path.join(projectDir(slug), 'uploads');
+    const exportUploadsDir = path.join(exportDir, 'uploads');
+    let uploadFiles = [];
+    try {
+      const entries = await fs.readdir(uploadsDir);
+      if (entries.length > 0) {
+        await fs.mkdir(exportUploadsDir, { recursive: true });
+        for (const entry of entries) {
+          const src = path.join(uploadsDir, entry);
+          const dst = path.join(exportUploadsDir, entry);
+          await fs.copyFile(src, dst);
+          uploadFiles.push(entry);
+        }
+      }
+    } catch (e) { /* no uploads folder, fine */ }
+
     const zip = new JSZip();
     for (const [name, content] of Object.entries(allFiles)) {
       zip.file(name, content);
+    }
+    for (const upload of uploadFiles) {
+      const buf = await fs.readFile(path.join(uploadsDir, upload));
+      zip.file(`uploads/${upload}`, buf);
     }
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
     const zipPath = path.join(exportDir, `${slug}-${timestamp}.zip`);

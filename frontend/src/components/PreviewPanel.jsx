@@ -8,14 +8,16 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug }) {
   const [viewport, setViewport] = useState('desktop');
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const iframeRef = useRef(null);
   const pageDropdownRef = useRef(null);
   const pageNames = Object.keys(pages || {});
-  const html = pages?.[activePage] || '';
+  const rawHtml = pages?.[activePage] || '';
+  // Rewrite `uploads/foo.jpg` → absolute backend URL so srcDoc iframes can load them.
+  const html = rawHtml ? rewriteUploadsUrls(rawHtml, slug) : '';
 
   // Close page dropdown on outside click (parent doc).
   useEffect(() => {
@@ -90,8 +92,8 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
         <div className="left">
           {pageNames.length > 1 && (
             <div className="page-dropdown" ref={pageDropdownRef}>
-              <button onClick={() => setPageMenuOpen(o => !o)}>
-                {activePage} ▾
+              <button className="with-caret" onClick={() => setPageMenuOpen(o => !o)}>
+                {activePage}
               </button>
               {pageMenuOpen && (
                 <div className="page-dropdown-list">
@@ -109,8 +111,8 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
             </div>
           )}
           <div className="tools-wrap">
-            <button onClick={() => setToolsOpen(o => !o)} disabled={!html} title="Theme tools">
-              Tools ▾
+            <button className="with-caret" onClick={() => setToolsOpen(o => !o)} disabled={!html} title="Theme tools">
+              Tools
             </button>
             {toolsOpen && (
               <ToolsMenu
@@ -204,4 +206,13 @@ function resolveLink(href, pages, doc) {
   // Try slug-ifying the link text as a last resort? No — too risky.
 
   return { action: 'block' };
+}
+
+// Rewrite relative `uploads/foo.jpg` paths to an absolute backend URL so the
+// srcDoc iframe (no origin) can fetch them.
+function rewriteUploadsUrls(html, slug) {
+  if (!slug) return html;
+  const base = `http://localhost:3001/api/projects/${slug}/uploads/`;
+  return html.replace(/(src|href)=(['"])(?:\.\/)?uploads\/([^'"]+)\2/g,
+    (_, attr, q, file) => `${attr}=${q}${base}${file}${q}`);
 }
