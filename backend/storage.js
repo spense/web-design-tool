@@ -103,11 +103,53 @@ export async function saveProject(slug, { project, pages, session }) {
 }
 
 export async function renameProject(slug, newName) {
+  const trimmed = String(newName || '').trim();
+  if (!trimmed) {
+    const err = new Error('Project name cannot be empty.');
+    err.status = 400;
+    throw err;
+  }
+
   const data = await getProject(slug);
   if (!data) return null;
-  data.project.name = newName;
-  await saveProject(slug, { project: data.project });
-  return data.project;
+
+  // No-op when the name didn't actually change (case-insensitive).
+  if (data.project.name?.toLowerCase() === trimmed.toLowerCase() && data.project.name === trimmed) {
+    return data.project;
+  }
+
+  // Reject if another project already uses this name (case-insensitive).
+  const others = (await listProjects()).filter(p => p.slug !== slug);
+  if (others.some(p => p.name?.toLowerCase() === trimmed.toLowerCase())) {
+    const err = new Error(`A project named "${trimmed}" already exists.`);
+    err.status = 409;
+    throw err;
+  }
+
+  // Compute new slug from name + the project's creation date (preserves the
+  // original {name}-{date} pattern so collisions are minimized).
+  const createdDate = (data.project.created || new Date().toISOString()).slice(0, 10);
+  const newSlug = slugify(`${trimmed}-${createdDate}`);
+
+  // Rename the folder if the slug changed.
+  if (newSlug !== slug) {
+    if (await exists(projectDir(newSlug))) {
+      const err = new Error(`A project folder for "${newSlug}" already exists.`);
+      err.status = 409;
+      throw err;
+    }
+    await fs.rename(projectDir(slug), projectDir(newSlug));
+  }
+
+  // Update project.json in (the possibly-new) directory.
+  const updated = {
+    ...data.project,
+    name: trimmed,
+    slug: newSlug,
+    modified: new Date().toISOString(),
+  };
+  await writeJson(path.join(projectDir(newSlug), 'project.json'), updated);
+  return updated;
 }
 
 export async function deleteProject(slug) {

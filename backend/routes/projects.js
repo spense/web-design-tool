@@ -38,7 +38,10 @@ router.patch('/:slug/name', async (req, res, next) => {
     const updated = await renameProject(req.params.slug, name);
     if (!updated) return res.status(404).json({ error: 'Not found' });
     res.json(updated);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
 });
 
 router.delete('/:slug', async (req, res, next) => {

@@ -18,9 +18,13 @@ export default function App() {
         const state = await api.getAppState();
         if (state?.openTabs?.length) {
           // Validate that each project slug still exists; drop stale tabs.
+          // Also override saved tab.name with the live project.json name so
+          // renames done in a previous session show up after reload.
           const projects = await api.listProjects();
-          const slugs = new Set(projects.map(p => p.slug));
-          const valid = state.openTabs.filter(t => !t.slug || slugs.has(t.slug));
+          const projectMap = new Map(projects.map(p => [p.slug, p]));
+          const valid = state.openTabs
+            .filter(t => !t.slug || projectMap.has(t.slug))
+            .map(t => t.slug ? { ...t, name: projectMap.get(t.slug).name } : t);
           if (valid.length) {
             setTabs(valid);
             setActiveId(valid.find(t => t.id === state.activeTab)?.id || valid[0].id);
@@ -75,9 +79,24 @@ export default function App() {
 
   const renameTab = useCallback(async (id, name) => {
     const tab = tabs.find(t => t.id === id);
+    if (!tab) return;
+    const oldName = tab.name;
+    // Optimistic local update
     updateTab(id, { name });
-    if (tab?.slug) {
-      try { await api.renameProject(tab.slug, name); } catch (e) { console.error(e); }
+    if (tab.slug) {
+      try {
+        const updated = await api.renameProject(tab.slug, name);
+        // Backend may have changed the slug to match the new name — sync it.
+        if (updated?.slug && updated.slug !== tab.slug) {
+          updateTab(id, { slug: updated.slug, name: updated.name });
+        } else if (updated?.name) {
+          updateTab(id, { name: updated.name });
+        }
+      } catch (e) {
+        // Revert local change and surface the error.
+        updateTab(id, { name: oldName });
+        alert(`Rename failed: ${e.message}`);
+      }
     }
   }, [tabs, updateTab]);
 
