@@ -44,6 +44,17 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey }) {
     }
   }, [data, persist, activePage]);
 
+  const handleSnapshot = useCallback((tokens) => {
+    if (!data || data.project.tokenSnapshot) return;
+    const nextProject = { ...data.project, tokenSnapshot: tokens };
+    persist({ ...data, project: nextProject });
+  }, [data, persist]);
+
+  const handleApplyTokens = useCallback((newPages) => {
+    if (!data) return;
+    persist({ ...data, pages: newPages });
+  }, [data, persist]);
+
   const handleExport = useCallback(async () => {
     setExporting(true);
     try {
@@ -75,6 +86,9 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey }) {
         onActivePage={setActivePage}
         onExport={handleExport}
         exporting={exporting}
+        snapshot={data.project.tokenSnapshot || null}
+        onSnapshot={handleSnapshot}
+        onApplyTokens={handleApplyTokens}
       />
       {exportResult && (
         <ExportModal

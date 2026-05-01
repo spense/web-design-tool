@@ -74,6 +74,68 @@ MOBILE RESPONSIVENESS — NON-NEGOTIABLE:
 - At mobile: columns stack, fonts scale down, touch targets ≥ 44px, images fluid (max-width: 100%)
 - Test your mental model at 390px AND 1280px before finalizing
 
+Design tokens — REQUIRED, this is non-negotiable:
+
+Every design must define a CSS variables block at the top of the stylesheet inside \`:root\` and use those variables throughout the design. This lets the user swap themes (colors/fonts/spacing) instantly via a Tools menu without re-running you.
+
+Required tokens (define ALL of these, even if some hold defaults):
+
+\`\`\`
+:root {
+  /* Colors */
+  --color-bg: #...;            /* page background */
+  --color-surface: #...;       /* card / section backgrounds, slightly elevated */
+  --color-text: #...;          /* primary body text */
+  --color-text-muted: #...;    /* secondary text, captions */
+  --color-primary: #...;       /* main brand color, CTAs */
+  --color-primary-contrast: #...; /* text on top of --color-primary */
+  --color-accent: #...;        /* secondary accent, hover states */
+  --color-border: #...;        /* dividers, subtle borders */
+
+  /* Typography */
+  --font-heading: '...', sans-serif;
+  --font-body: '...', sans-serif;
+  --font-size-base: 16px;
+  --font-size-h1: 3rem;
+  --font-size-h2: 2.25rem;
+  --font-size-h3: 1.5rem;
+  --line-height-base: 1.6;
+
+  /* Spacing scale */
+  --space-xs: 0.5rem;
+  --space-sm: 1rem;
+  --space-md: 2rem;
+  --space-lg: 4rem;
+  --space-xl: 6rem;
+
+  /* Shape */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-button: 8px;  /* Buttons specifically — separate from container radii so a "Pill" theme can round only buttons */
+
+  /* Effects */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
+}
+\`\`\`
+
+Rules:
+- Every color that carries brand or theme intent must be a \`var(--color-...)\` reference, not a literal hex/rgb. This includes: text colors, backgrounds, borders, button fills, link colors, hover/focus/active state colors, gradient stops, icon colors. No \`color: #2c5aa0\` or \`background: rgb(44, 90, 160)\` anywhere outside \`:root\` — always \`color: var(--color-primary)\`.
+- Pure-black/white \`rgba()\` used for shadows and overlays may stay as literals (e.g. \`box-shadow: 0 4px 12px rgba(0,0,0,0.1)\`, \`background: rgba(255,255,255,0.85)\` for a translucent header). These don't carry theme intent.
+- Anything that LOOKS like a brand/theme color (red, blue, green, your primary, your accent) is a var. Anything that looks like a neutral shadow/overlay can be a literal rgba.
+- Every font-family must reference \`--font-heading\` or \`--font-body\`. No hardcoded font stacks in selectors.
+- The contract is THEMATIC-ONLY — only values that the user might want to swap as a theme need to be vars. Component-internal values (button padding, badge dimensions, icon sizes, caption font-size, testimonial quote size) can be literal. The line is: does this value carry brand/theme intent, or is it just how this component looks?
+- Major spacing IS thematic. ALL padding/margin on \`<section>\`, \`<header>\`, \`<footer>\`, \`<main>\`, the hero, and the vertical rhythm between major blocks MUST use \`var(--space-*)\`. A "Compact / Comfortable / Roomy" spacing theme rewrites these vars — that only works if the major-block padding uses them.
+- Body font-size IS thematic. Body text, paragraph copy, and large heading sizes MUST use \`var(--font-size-base)\` or \`var(--font-size-h1/h2/h3)\`. A "Small / Medium / Large" font-size theme rewrites these vars. Component-internal sizes (button label, badge text, captions) can be literal \`rem\` values — they don't theme.
+- Border-radius IS thematic. Card/section/image corners use \`var(--radius-sm/md/lg)\`. **Button corners use \`var(--radius-button)\`** specifically — this keeps buttons themeable independently (so a "Pill" theme can round only buttons while leaving cards rectangular). Tiny decorative radii (a 2px chip indicator) can stay literal.
+- Font-family is ALWAYS thematic. Every \`font-family\` outside \`:root\` MUST be \`var(--font-heading)\` or \`var(--font-body)\`.
+- Colors are ALWAYS thematic — see the color rules above. No exceptions for components.
+- If you need a value not on the scale (a half-step, an extreme), define a new variable rather than using a literal.
+- For Google Fonts: import them with a \`<link>\` tag in \`<head>\` AND reference them via \`--font-heading\` / \`--font-body\`. The font name in the link and in the variable must match exactly.
+
+Why this matters: a Tools menu in the app rewrites these variable values in the source HTML. If a color is hardcoded, the menu can't change it — the design is "locked." Always use variables.
+
 Visual & content:
 - Modern, professional, conversion-focused (these are lead-gen sites)
 - Inline all CSS in a \`<style>\` tag in \`<head>\`

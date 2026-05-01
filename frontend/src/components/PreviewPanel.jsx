@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Spinner from './Spinner.jsx';
+import ToolsMenu from './ToolsMenu.jsx';
 
 const VIEWPORTS = {
   desktop: { label: 'Desktop', width: '100%' },
@@ -7,15 +8,34 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens }) {
   const [viewport, setViewport] = useState('desktop');
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const iframeRef = useRef(null);
+  const pageDropdownRef = useRef(null);
   const pageNames = Object.keys(pages || {});
   const html = pages?.[activePage] || '';
 
-  // Intercept iframe nav clicks to re-route between project pages, with
-  // forgiving fallbacks for slightly-off AI-generated links.
+  // Close page dropdown on outside click (parent doc).
+  useEffect(() => {
+    if (!pageMenuOpen) return;
+    const onDoc = (e) => {
+      if (pageDropdownRef.current && !pageDropdownRef.current.contains(e.target)) {
+        setPageMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [pageMenuOpen]);
+
+  // Intercept iframe nav clicks; ALSO close any open popovers when the user
+  // clicks anywhere inside the iframe (parent doc's mousedown listener can't
+  // see clicks inside a child document).
+  const closeAllPopovers = () => {
+    setPageMenuOpen(false);
+    setToolsOpen(false);
+  };
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe || !html) return;
@@ -23,6 +43,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
       try {
         const doc = iframe.contentDocument;
         if (!doc) return;
+        doc.addEventListener('mousedown', closeAllPopovers, { capture: true });
         doc.querySelectorAll('a[href]').forEach(a => {
           a.addEventListener('click', (ev) => {
             const href = a.getAttribute('href') || '';
@@ -35,10 +56,8 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
               const el = doc.getElementById(resolved.target);
               if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
             } else if (resolved.action === 'block') {
-              // Empty/# placeholder link — prevent the iframe from jumping to top
               ev.preventDefault();
             }
-            // else: native (mailto:, tel:, http(s) external) — let it through
           });
         });
       } catch {}
@@ -64,12 +83,12 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     <div className="preview-panel">
       <div className="preview-toolbar">
         <div className="left">
-          <div className="page-dropdown">
+          <div className="page-dropdown" ref={pageDropdownRef}>
             <button onClick={() => setPageMenuOpen(o => !o)} disabled={pageNames.length === 0}>
               {activePage || 'No pages'} {pageNames.length > 1 ? '▾' : ''}
             </button>
             {pageMenuOpen && pageNames.length > 0 && (
-              <div className="page-dropdown-list" onMouseLeave={() => setPageMenuOpen(false)}>
+              <div className="page-dropdown-list">
                 {pageNames.map(name => (
                   <button
                     key={name}
@@ -80,6 +99,21 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                   </button>
                 ))}
               </div>
+            )}
+          </div>
+          <div className="tools-wrap">
+            <button onClick={() => setToolsOpen(o => !o)} disabled={!html} title="Theme tools">
+              Tools ▾
+            </button>
+            {toolsOpen && (
+              <ToolsMenu
+                pages={pages}
+                activePage={activePage}
+                snapshot={snapshot}
+                onSnapshot={onSnapshot}
+                onApply={onApplyTokens}
+                onClose={() => setToolsOpen(false)}
+              />
             )}
           </div>
         </div>
