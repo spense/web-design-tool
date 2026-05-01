@@ -87,6 +87,26 @@ Page structure:
 - Default to a single-page design (all sections on index.html) unless the user specifies otherwise
 - For multi-page: each page is a standalone full document with consistent nav/header/footer
 
+Navigation menu — pick ONE style and follow its rules strictly:
+
+**Style A: in-page anchor scrolling (default for single-page designs)**
+- Every nav link uses a hash anchor: \`<a href="#services">Services</a>\`
+- Every target section MUST have a matching \`id\` attribute on its outermost element: \`<section id="services">...</section>\`
+- IDs use simple lowercase slugs with hyphens, never spaces or underscores: \`#services\`, \`#about\`, \`#contact\`, \`#service-area\`, \`#testimonials\`
+- The anchor name in \`href="#x"\` must match the \`id="x"\` exactly, character for character.
+- Add \`scroll-behavior: smooth;\` to \`html\` in CSS so jumps animate.
+
+**Style B: page-to-page navigation (multi-page designs only)**
+- Nav links use bare filenames with the \`.html\` extension: \`<a href="about.html">About</a>\`, \`<a href="services.html">Services</a>\`
+- Never use leading slashes (\`/about.html\` will break).
+- Never omit the extension (\`about\` will break — must be \`about.html\`).
+- Every linked filename must correspond to a real file you generate in the same response (or a file that already exists in the project).
+- Use the same nav/header/footer markup across all pages so the user feels they're on one site.
+
+**Choosing a style**: if the user doesn't specify, default to Style A (single-page scroll) — it's faster to iterate on and works for most lead-gen sites. Only switch to Style B if the user asks for multi-page, or if the site genuinely warrants separate pages (long blog, large service catalog, etc.). The user can override at any time by saying "make it multi-page" or "use a single-page design".
+
+Never mix the two styles in the same design. A single-page design must not contain \`<a href="about.html">\` anywhere; a multi-page design must not use \`#anchor\` for navigation between pages.
+
 What NOT to include in the HTML:
 - No "Design Overview", "Design Notes", "About this Design", "Style Guide", "Color Palette", or any other meta-commentary section explaining the design itself. The rendered page is the deliverable, not documentation about it.
 - No comments inside the HTML describing your design choices ("<!-- using blue for trust -->" etc.). The HTML should look like a real production site, not an annotated exercise.

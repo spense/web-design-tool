@@ -14,7 +14,8 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   const pageNames = Object.keys(pages || {});
   const html = pages?.[activePage] || '';
 
-  // Intercept iframe nav clicks to re-route between project pages.
+  // Intercept iframe nav clicks to re-route between project pages, with
+  // forgiving fallbacks for slightly-off AI-generated links.
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe || !html) return;
@@ -23,17 +24,22 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
         const doc = iframe.contentDocument;
         if (!doc) return;
         doc.querySelectorAll('a[href]').forEach(a => {
-          const href = a.getAttribute('href') || '';
-          // resolve to a possible filename
-          const last = href.split('/').pop().split('?')[0].split('#')[0];
-          if (pages[last]) {
-            a.addEventListener('click', (ev) => {
+          a.addEventListener('click', (ev) => {
+            const href = a.getAttribute('href') || '';
+            const resolved = resolveLink(href, pages, doc);
+            if (resolved.action === 'page') {
               ev.preventDefault();
-              onActivePage(last);
-            });
-          } else if (href === '#' || href === '' || href.startsWith('#')) {
-            // leave anchor links alone
-          }
+              onActivePage(resolved.target);
+            } else if (resolved.action === 'scroll') {
+              ev.preventDefault();
+              const el = doc.getElementById(resolved.target);
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else if (resolved.action === 'block') {
+              // Empty/# placeholder link — prevent the iframe from jumping to top
+              ev.preventDefault();
+            }
+            // else: native (mailto:, tel:, http(s) external) — let it through
+          });
         });
       } catch {}
     };
@@ -120,4 +126,41 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
       </div>
     </div>
   );
+}
+
+// Decide what to do with a clicked anchor inside the iframe.
+//   { action: 'page',   target: 'about.html' }   → switch to that page in our UI
+//   { action: 'scroll', target: 'services'  }    → scroll to element with that id
+//   { action: 'block' }                          → it's `#` or empty, prevent default
+//   { action: 'native' }                         → let the browser handle it
+function resolveLink(href, pages, doc) {
+  if (!href) return { action: 'block' };
+  if (href === '#') return { action: 'block' };
+
+  // External / scheme-prefixed: let it through.
+  if (/^(https?:|mailto:|tel:|sms:)/i.test(href)) return { action: 'native' };
+
+  // Same-page anchor — scroll if the target id exists.
+  if (href.startsWith('#')) {
+    const id = href.slice(1);
+    if (id && doc.getElementById(id)) return { action: 'scroll', target: id };
+    return { action: 'block' };
+  }
+
+  // Strip leading slashes/dots, query string, fragment.
+  let path = href.replace(/^\.?\/*/, '').split('?')[0];
+  const fragment = path.includes('#') ? path.split('#')[1] : null;
+  path = path.split('#')[0];
+  const last = path.split('/').pop();
+
+  // Direct page match.
+  if (pages[last]) return { action: 'page', target: last };
+  // Try adding .html if the AI omitted it.
+  if (!last.includes('.') && pages[`${last}.html`]) return { action: 'page', target: `${last}.html` };
+  // Maybe it was meant as a section anchor on the same page.
+  if (last && doc.getElementById(last)) return { action: 'scroll', target: last };
+  if (fragment && doc.getElementById(fragment)) return { action: 'scroll', target: fragment };
+  // Try slug-ifying the link text as a last resort? No — too risky.
+
+  return { action: 'block' };
 }
