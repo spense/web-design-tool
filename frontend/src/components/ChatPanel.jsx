@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { streamChat, api } from '../api.js';
-import { parseFileBlocks, detectUrl } from '../parseFiles.js';
+import { parseFileBlocks, detectUrl, htmlStartIndex } from '../parseFiles.js';
 import Spinner from './Spinner.jsx';
 
 const MODELS = [
@@ -90,9 +90,16 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
 
     // Parse files out of the full response
     const { files, prose } = parseFileBlocks(fullText);
+    const fileCount = Object.keys(files).length;
+    let displayContent = prose;
+    if (!displayContent) {
+      displayContent = fileCount > 0
+        ? (Object.keys(pages).length > 0 ? 'Design updated.' : 'Design generated.')
+        : '(empty response)';
+    }
     const assistantMsg = {
       role: 'assistant',
-      content: prose || fullText,
+      content: displayContent,
       model,
       timestamp: new Date().toISOString(),
       files: Object.keys(files),
@@ -160,7 +167,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
 }
 
 function StreamingMessage({ text, model, isUpdate }) {
-  const idx = text.search(/<!--\s*FILE:/i);
+  const idx = htmlStartIndex(text);
   const proseOnly = idx === -1 ? text : text.slice(0, idx).trim();
   const generating = idx !== -1;
   const label = isUpdate ? 'Updating design' : 'Generating design';
