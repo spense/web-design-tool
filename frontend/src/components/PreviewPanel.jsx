@@ -66,8 +66,13 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     return () => iframe.removeEventListener('load', onLoad);
   }, [html, pages, onActivePage]);
 
+  const [copied, setCopied] = useState(false);
   const copyHtml = async () => {
-    try { await navigator.clipboard.writeText(html); } catch {}
+    try {
+      await navigator.clipboard.writeText(html);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
   };
 
   const openFullScreen = () => {
@@ -132,7 +137,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
         </div>
         <div className="right">
           <button onClick={openFullScreen} disabled={!html} title="Open in new browser tab">Full screen ↗</button>
-          <button onClick={copyHtml} disabled={!html}>Copy HTML</button>
+          <button onClick={copyHtml} disabled={!html}>{copied ? 'Copied!' : 'Copy HTML'}</button>
           <button className="primary" onClick={onExport} disabled={!html || exporting}>
             {exporting ? <><Spinner /> Exporting…</> : 'Export'}
           </button>

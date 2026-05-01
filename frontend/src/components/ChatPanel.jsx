@@ -17,10 +17,24 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   const [streamingText, setStreamingText] = useState('');
   const [crawling, setCrawling] = useState(false);
   const messagesRef = useRef(null);
+  const panelRef = useRef(null);
+  const textareaRef = useRef(null);
 
   useEffect(() => {
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight });
   }, [messages, streamingText, crawling]);
+
+  // Auto-grow textarea up to 50% of chat panel height, then scroll inside.
+  useEffect(() => {
+    const ta = textareaRef.current;
+    const panel = panelRef.current;
+    if (!ta || !panel) return;
+    ta.style.height = 'auto';
+    const max = Math.floor(panel.clientHeight * 0.5);
+    const next = Math.min(ta.scrollHeight, max);
+    ta.style.height = next + 'px';
+    ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
+  }, [input]);
 
   const send = async () => {
     if (!input.trim() || streaming || !hasApiKey) return;
@@ -162,7 +176,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   };
 
   return (
-    <div className="chat-panel">
+    <div className="chat-panel" ref={panelRef}>
       <div className="chat-messages" ref={messagesRef}>
         {messages.length === 0 && !streaming && !crawling && (
           <div className="chat-empty">
@@ -181,6 +195,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       </div>
       <div className="chat-input">
         <textarea
+          ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKey}
@@ -214,7 +229,7 @@ function StreamingMessage({ text, model, isUpdate }) {
   else label = 'Generating design';
   return (
     <div className="chat-msg assistant">
-      <div className="who">assistant · {model} · streaming</div>
+      <div className="who">assistant · {model}</div>
       <div className="body">
         {proseOnly}
         {generating && (
