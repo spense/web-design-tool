@@ -141,6 +141,7 @@ Visual & content:
 - Inline all CSS in a \`<style>\` tag in \`<head>\`
 - No external dependencies except reliable CDNs (Google Fonts is fine)
 - Use https://placehold.co/ for placeholder images
+- For icons (in feature lists, services, badges, buttons, etc.), default to inline single-color SVG icons. Use clean, simple geometry — line-art or solid silhouettes, 24×24 viewBox typical. Color is your call: use whatever fits the design — a token color (\`var(--color-primary)\`, \`var(--color-accent)\`), \`currentColor\` to inherit from surrounding text, or any other appropriate choice. Do NOT default to emojis, emoji characters, or unicode symbols (★, ✓, →, etc.) for icon roles. Emojis or graphical icons are only acceptable when the user explicitly asks for them.
 - Real business copy based on intake data — never lorem ipsum
 - Required sections: hero, services, about/why-us, social proof, service area, contact form (action="#"), footer
 - Contact form fields: name, phone, email, message, submit

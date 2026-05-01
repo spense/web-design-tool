@@ -12,7 +12,7 @@ const MODELS = [
 
 export default function ChatPanel({ project, pages, messages, activePage, onUpdate, hasApiKey }) {
   const [input, setInput] = useState('');
-  const [model, setModel] = useState('sonnet');
+  const [model, setModel] = useState(project.lastModel || 'sonnet');
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [crawling, setCrawling] = useState(false);
@@ -203,7 +203,15 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           disabled={!hasApiKey || streaming}
         />
         <div className="chat-input-row">
-          <select value={model} onChange={(e) => setModel(e.target.value)} disabled={streaming}>
+          <select
+            value={model}
+            onChange={(e) => {
+              const next = e.target.value;
+              setModel(next);
+              onUpdate(undefined, undefined, { ...project, lastModel: next });
+            }}
+            disabled={streaming}
+          >
             {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
           <span className="spacer" />
