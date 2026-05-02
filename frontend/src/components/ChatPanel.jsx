@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { streamChat, api } from '../api.js';
-import { parseFileBlocks, detectUrl, generationStartIndex } from '../parseFiles.js';
+import { parseFileBlocks, detectUrl, generationStartIndex, isCompleteHtmlDoc } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, editStartIndex } from '../parsePatch.js';
 import Spinner from './Spinner.jsx';
 
@@ -198,6 +198,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
 
     const fullText = result.text;
     const usage = result.usage;
+    const truncated = result.stopReason === 'max_tokens';
 
     // Try patches first; if any present, apply to existing pages.
     const { edits, prose: patchProse } = parsePatchBlocks(fullText);
@@ -205,11 +206,39 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
 
     // Then look for full FILE blocks (new files / wholesale rewrites).
     const { files, prose: fileProse } = parseFileBlocks(fullText);
-    const fileNames = Object.keys(files);
 
-    let updatedPages = { ...pages, ...files };
+    // Guard against truncated FULL FILE emits silently overwriting good files.
+    // If a page didn't make it to </html>, drop it from the persist set.
+    const rejectedFiles = [];
+    const safeFiles = {};
+    for (const [name, html] of Object.entries(files)) {
+      if (isCompleteHtmlDoc(html)) {
+        safeFiles[name] = html;
+      } else {
+        rejectedFiles.push(name);
+      }
+    }
+    const fileNames = Object.keys(safeFiles);
+
+    let updatedPages = { ...pages, ...safeFiles };
     let appliedSummary = [];
     const failureMessages = [];
+
+    if (rejectedFiles.length > 0) {
+      const list = rejectedFiles.map(n => `  • ${n}`).join('\n');
+      failureMessages.push({
+        role: 'system',
+        content: `Skipped writing incomplete file(s) (the response was cut off before the page finished):\n${list}\n\nAsk me to regenerate ${rejectedFiles.length === 1 ? 'that page' : 'those pages'}, or break the request into smaller asks.`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    if (truncated) {
+      failureMessages.push({
+        role: 'system',
+        content: `Response hit the output token limit and was truncated. Any partial files above were discarded. Try again with a smaller change, or split the request across multiple turns.`,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     if (editFiles.length > 0) {
       const result = applyPatches(updatedPages, edits);

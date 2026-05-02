@@ -26,14 +26,23 @@ function parseLabeled(text) {
     matches.push({ filename: m[1].trim(), start: m.index, contentStart: m.index + m[0].length });
   }
   if (matches.length === 0) return { files: {}, prose: text.trim() };
-  const prose = text.slice(0, matches[0].start).trim();
+  const proseParts = [text.slice(0, matches[0].start)];
   for (let i = 0; i < matches.length; i++) {
     const end = i + 1 < matches.length ? matches[i + 1].start : text.length;
     let content = text.slice(matches[i].contentStart, end).trim();
     content = content.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```\s*$/, '');
+    // If the model wrote commentary after </html>, split it off so it doesn't
+    // contaminate the file content (and break completeness checks).
+    const closeMatch = content.match(/<\/html\s*>/i);
+    if (closeMatch) {
+      const cutAt = closeMatch.index + closeMatch[0].length;
+      const trailing = content.slice(cutAt).trim();
+      content = content.slice(0, cutAt);
+      if (trailing) proseParts.push('\n' + trailing);
+    }
     files[matches[i].filename] = content;
   }
-  return { files, prose };
+  return { files, prose: proseParts.join('').trim() };
 }
 
 // Extract one or more `<!DOCTYPE html>...</html>` (or `<html>...</html>`) docs.
@@ -72,6 +81,18 @@ export function htmlStartIndex(text) {
 export function generationStartIndex(text) {
   const match = text.match(/<!--\s*EDIT:|<!--\s*FILE:|<!DOCTYPE\s+html|<html[\s>]|```html|<{5,}\s*SEARCH/i);
   return match ? match.index : -1;
+}
+
+// A FULL FILE emit is only safe to persist if it parses as a complete HTML
+// document — has a body and a closing </html>. Truncated streams (max_tokens
+// hit mid-output) leave a head-only stub that overwrites a previously good
+// file with something the browser renders blank.
+export function isCompleteHtmlDoc(html) {
+  if (!html || typeof html !== 'string') return false;
+  const s = html.trim();
+  if (!/<\/html\s*>\s*$/i.test(s)) return false;
+  if (!/<body[\s>]/i.test(s)) return false;
+  return true;
 }
 
 export function detectUrl(text) {

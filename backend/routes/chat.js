@@ -43,7 +43,7 @@ router.post('/', async (req, res, next) => {
 
     const stream = client.messages.stream({
       model: resolveModel(model),
-      max_tokens: 16000,
+      max_tokens: 32000,
       system: systemBlocks,
       messages,
     });
@@ -63,6 +63,7 @@ router.post('/', async (req, res, next) => {
       const usage = finalMessage.usage || {};
       const stats = {
         text: fullText,
+        stopReason: finalMessage.stop_reason || null,
         usage: {
           input_tokens: usage.input_tokens ?? 0,
           output_tokens: usage.output_tokens ?? 0,
@@ -70,7 +71,7 @@ router.post('/', async (req, res, next) => {
           cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
         },
       };
-      console.log(`[chat] model=${resolveModel(model)} in=${stats.usage.input_tokens} out=${stats.usage.output_tokens} cache_write=${stats.usage.cache_creation_input_tokens} cache_read=${stats.usage.cache_read_input_tokens}`);
+      console.log(`[chat] model=${resolveModel(model)} stop=${stats.stopReason} in=${stats.usage.input_tokens} out=${stats.usage.output_tokens} cache_write=${stats.usage.cache_creation_input_tokens} cache_read=${stats.usage.cache_read_input_tokens}`);
       res.write(`event: done\ndata: ${JSON.stringify(stats)}\n\n`);
       res.end();
     } catch (err) {

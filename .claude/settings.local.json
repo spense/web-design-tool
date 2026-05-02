@@ -29,7 +29,9 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/components/ChatPanel.jsx)",
       "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/server.js)",
       "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/routes/uploads.js)",
-      "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/routes/export.js)"
+      "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/routes/export.js)",
+      "Bash(node -e \"const fs = require\\('fs'\\); const data = JSON.parse\\(fs.readFileSync\\('/Users/spenserlea/Sites/web-design-tool/projects/abe-jones-v11-2026-05-01/pages.json', 'utf8'\\)\\); const index = data['index.html']; const matches = index.match\\(/href=\\\\\"[^\\\\\"]*\\\\\"/g\\); console.log\\(matches ? matches.slice\\(0, 20\\) : 'no matches'\\);\")",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

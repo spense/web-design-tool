@@ -86,11 +86,11 @@ export async function streamChat({ model, messages, context, onDelta, signal }) 
         fullText += parsed.delta;
         onDelta?.(parsed.delta, fullText);
       } else if (event === 'done') {
-        return { text: parsed.text || fullText, usage: parsed.usage || null };
+        return { text: parsed.text || fullText, usage: parsed.usage || null, stopReason: parsed.stopReason || null };
       } else if (event === 'error') {
         throw new Error(parsed.error || 'Stream error');
       }
     }
   }
-  return { text: fullText, usage: null };
+  return { text: fullText, usage: null, stopReason: null };
 }

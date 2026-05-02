@@ -48,6 +48,9 @@ Use when (and prefer this when in doubt — it's much faster):
 - Adding/removing items in a list (services, testimonials, links)
 - Adjusting spacing, fonts, sizes
 - Anything where most of the file stays the same
+- **Theme / restyle changes** (new color palette, "make it more modern", "minimalist", font swap, spacing rework). The whole point of the design-tokens block is that a restyle is a small edit to \`:root\` plus a handful of targeted tweaks — NOT a full rewrite. Rewrite the \`:root\` token values in PATCH MODE and apply small follow-up edits where component-internal styles need to match. Do this even when the visual change feels big.
+
+CRITICAL — do not re-emit unrelated pages. When the user asks for changes to one page (or a theme change that applies via tokens), only emit FILE/EDIT blocks for the file(s) you actually need to change. Never wholesale re-emit a sibling page (e.g. contact.html) just to "keep it in sync" — the shared \`:root\` tokens already do that, and re-emitting risks truncation that wipes out the existing page. If a multi-page restyle truly requires touching every page, use PATCH MODE on each, not FULL FILE MODE.
 
 Format: emit \`<!-- EDIT: filename -->\` markers, each followed by one or more SEARCH/REPLACE blocks. Use the EXACT delimiter lines shown.
 
