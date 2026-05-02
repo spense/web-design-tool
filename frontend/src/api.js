@@ -21,6 +21,7 @@ export const api = {
   saveProject: (slug, payload) => jsonReq('PUT', `/projects/${slug}`, payload),
   renameProject: (slug, name) => jsonReq('PATCH', `/projects/${slug}/name`, { name }),
   deleteProject: (slug) => jsonReq('DELETE', `/projects/${slug}`),
+  duplicateProject: (slug) => jsonReq('POST', `/projects/${slug}/duplicate`),
   crawl: (url) => jsonReq('POST', '/crawl', { url }),
   exportProject: (slug, model) => jsonReq('POST', `/export/${slug}`, { model }),
   downloadExportUrl: (slug, timestamp) => `${API}/export/${slug}/download/${timestamp}`,

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { listProjects, getProject, createProject, saveProject, renameProject, deleteProject } from '../storage.js';
+import { listProjects, getProject, createProject, saveProject, renameProject, deleteProject, duplicateProject } from '../storage.js';
 
 const router = Router();
 
@@ -42,6 +42,14 @@ router.patch('/:slug/name', async (req, res, next) => {
     if (e.status) return res.status(e.status).json({ error: e.message });
     next(e);
   }
+});
+
+router.post('/:slug/duplicate', async (req, res, next) => {
+  try {
+    const updated = await duplicateProject(req.params.slug);
+    if (!updated) return res.status(404).json({ error: 'Not found' });
+    res.json(updated);
+  } catch (e) { next(e); }
 });
 
 router.delete('/:slug', async (req, res, next) => {

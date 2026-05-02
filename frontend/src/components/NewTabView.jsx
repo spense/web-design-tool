@@ -54,6 +54,11 @@ export default function NewTabView({ onProjectOpened }) {
     try { await api.deleteProject(slug); refresh(); } catch (err) { setErr(err.message); }
   };
 
+  const handleDuplicate = async (e, slug) => {
+    e.stopPropagation();
+    try { await api.duplicateProject(slug); refresh(); } catch (err) { setErr(err.message); }
+  };
+
   return (
     <div className="new-tab-view">
       <div className="new-tab-card">
@@ -98,6 +103,12 @@ export default function NewTabView({ onProjectOpened }) {
                 <div className="meta">
                   {p.modified ? new Date(p.modified).toLocaleString() : ''}
                 </div>
+                <button className="ghost" onClick={(e) => handleDuplicate(e, p.slug)} title="Duplicate" style={{ padding: '2px 6px', fontSize: 12, display: 'inline-flex', alignItems: 'center' }} aria-label="Duplicate">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                </button>
                 <button className="ghost" onClick={(e) => handleDelete(e, p.slug)} title="Delete" style={{ padding: '2px 8px', fontSize: 12 }}>×</button>
               </div>
             </div>

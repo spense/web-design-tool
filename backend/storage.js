@@ -156,6 +156,36 @@ export async function deleteProject(slug) {
   await fs.rm(projectDir(slug), { recursive: true, force: true });
 }
 
+export async function duplicateProject(slug) {
+  const data = await getProject(slug);
+  if (!data) return null;
+  const { project: original } = data;
+
+  const newName = `${original.name} Copy`;
+  const date = new Date().toISOString().slice(0, 10);
+  let newSlug = slugify(`${newName}-${date}`);
+  let suffix = 1;
+  while (await exists(projectDir(newSlug))) {
+    newSlug = slugify(`${newName}-${date}-${++suffix}`);
+  }
+
+  await fs.cp(projectDir(slug), projectDir(newSlug), { recursive: true });
+  // Drop the inherited exports/ — they belong to the original.
+  await fs.rm(path.join(projectDir(newSlug), 'exports'), { recursive: true, force: true });
+
+  const now = new Date().toISOString();
+  const updated = {
+    ...original,
+    slug: newSlug,
+    name: newName,
+    created: now,
+    modified: now,
+    duplicatedFrom: original.slug,
+  };
+  await writeJson(path.join(projectDir(newSlug), 'project.json'), updated);
+  return updated;
+}
+
 async function exists(p) {
   try { await fs.access(p); return true; } catch { return false; }
 }

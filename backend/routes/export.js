@@ -41,23 +41,29 @@ router.post('/:slug', async (req, res, next) => {
     const exportDir = path.join(projectDir(slug), 'exports', timestamp);
     await fs.mkdir(exportDir, { recursive: true });
 
-    const allFiles = { ...pages, ...docFiles };
+    // In the working project, image paths use `uploads/...` (matches on-disk
+    // layout). In the export, rename that folder to `assets/` and rewrite
+    // references in HTML/CSS so paths resolve in the unpacked zip.
+    const rewritePaths = (content, name) =>
+      name.endsWith('.html') ? content.replace(/(["'(=\s])uploads\//g, '$1assets/') : content;
+
+    const allFiles = Object.fromEntries(
+      Object.entries({ ...pages, ...docFiles }).map(([n, c]) => [n, rewritePaths(c, n)])
+    );
     for (const [name, content] of Object.entries(allFiles)) {
       await fs.writeFile(path.join(exportDir, name), content, 'utf8');
     }
 
-    // Copy uploads/ folder into the export so `<img src="uploads/...">` paths
-    // resolve in the unpacked zip.
     const uploadsDir = path.join(projectDir(slug), 'uploads');
-    const exportUploadsDir = path.join(exportDir, 'uploads');
+    const exportAssetsDir = path.join(exportDir, 'assets');
     let uploadFiles = [];
     try {
       const entries = await fs.readdir(uploadsDir);
       if (entries.length > 0) {
-        await fs.mkdir(exportUploadsDir, { recursive: true });
+        await fs.mkdir(exportAssetsDir, { recursive: true });
         for (const entry of entries) {
           const src = path.join(uploadsDir, entry);
-          const dst = path.join(exportUploadsDir, entry);
+          const dst = path.join(exportAssetsDir, entry);
           await fs.copyFile(src, dst);
           uploadFiles.push(entry);
         }
@@ -70,7 +76,7 @@ router.post('/:slug', async (req, res, next) => {
     }
     for (const upload of uploadFiles) {
       const buf = await fs.readFile(path.join(uploadsDir, upload));
-      zip.file(`uploads/${upload}`, buf);
+      zip.file(`assets/${upload}`, buf);
     }
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
     const zipPath = path.join(exportDir, `${slug}-${timestamp}.zip`);
