@@ -1,11 +1,24 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 
 export default function NewTabView({ onProjectOpened }) {
   const [projects, setProjects] = useState([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [query, setQuery] = useState('');
   const fileRef = useRef(null);
+  const searchRef = useRef(null);
+
+  useEffect(() => { searchRef.current?.focus(); }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter(p =>
+      (p.name || '').toLowerCase().includes(q) ||
+      (p.slug || '').toLowerCase().includes(q)
+    );
+  }, [projects, query]);
 
   const refresh = () => api.listProjects().then(setProjects).catch(e => setErr(e.message));
   useEffect(() => { refresh(); }, []);
@@ -58,9 +71,24 @@ export default function NewTabView({ onProjectOpened }) {
         <div style={{ fontSize: 12, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
           Open Project
         </div>
+        <input
+          ref={searchRef}
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && filtered.length > 0) handleOpen(filtered[0].slug);
+            if (e.key === 'Escape') setQuery('');
+          }}
+          placeholder="Search projects…"
+          style={{ width: '100%', marginBottom: 8 }}
+        />
         <div className="project-list">
           {projects.length === 0 && <div className="project-list-empty">No projects yet.</div>}
-          {projects.map(p => (
+          {projects.length > 0 && filtered.length === 0 && (
+            <div className="project-list-empty">No matches for "{query}".</div>
+          )}
+          {filtered.map(p => (
             <div key={p.slug} className="project-list-item" onClick={() => handleOpen(p.slug)}>
               <div>
                 <div style={{ fontWeight: 600 }}>{p.name}</div>
