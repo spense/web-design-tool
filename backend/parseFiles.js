@@ -18,7 +18,7 @@ export function parseFileBlocks(text) {
 
 function parseLabeled(text) {
   const files = {};
-  const re = /<!--\s*FILE:\s*([^\s>-]+)\s*-->/gi;
+  const re = /<!--\s*FILE:\s*([^\s>]+)\s*-->/gi;
   const matches = [];
   let m;
   while ((m = re.exec(text)) !== null) {

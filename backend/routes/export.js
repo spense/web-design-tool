@@ -38,7 +38,7 @@ router.post('/:slug', async (req, res, next) => {
     const { files: docFiles } = parseFileBlocks(text);
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const exportDir = path.join(projectDir(slug), 'exports', timestamp);
+    const exportDir = path.join(projectDir(slug), 'exports', `design-reference-${timestamp}`);
     await fs.mkdir(exportDir, { recursive: true });
 
     // In the working project, image paths use `uploads/...` (matches on-disk
@@ -95,7 +95,7 @@ router.post('/:slug', async (req, res, next) => {
 router.get('/:slug/download/:timestamp', async (req, res, next) => {
   try {
     const { slug, timestamp } = req.params;
-    const exportDir = path.join(projectDir(slug), 'exports', timestamp);
+    const exportDir = path.join(projectDir(slug), 'exports', `design-reference-${timestamp}`);
     const entries = await fs.readdir(exportDir);
     const zipName = entries.find(f => f.endsWith('.zip'));
     if (!zipName) return res.status(404).json({ error: 'Zip not found' });

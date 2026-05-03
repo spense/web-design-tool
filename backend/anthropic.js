@@ -166,6 +166,11 @@ Page structure:
   - Page titles (\`<title>\`) and meta descriptions must differ per page.
   - Use the same color, spacing, and typography rules — no design drift between pages.
 
+Navigation menu semantics — REQUIRED:
+
+- ALL navigation menus in the header (and footer, if present) MUST be wrapped in a \`<nav>\` element. This applies even when the menu uses a \`<ul>\` or \`<ol>\` for layout — the \`<nav>\` wraps the list. \`<header><nav><ul>...</ul></nav></header>\` is correct; \`<header><ul>...</ul></header>\` is WRONG.
+- This is a semantic requirement for downstream tooling that parses the design — never skip it, even for minimal menus.
+
 Navigation menu — pick ONE style and follow its rules strictly:
 
 **Style A: in-page anchor scrolling (default for single-page designs)**

@@ -5,7 +5,7 @@
 //
 // Prose is whatever text sits outside any EDIT block.
 export function parsePatchBlocks(text) {
-  const editHeader = /<!--\s*EDIT:\s*([^\s>-]+)\s*-->/gi;
+  const editHeader = /<!--\s*EDIT:\s*([^\s>]+)\s*-->/gi;
   const headers = [];
   let m;
   while ((m = editHeader.exec(text)) !== null) {
