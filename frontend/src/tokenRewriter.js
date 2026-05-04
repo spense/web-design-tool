@@ -55,6 +55,13 @@ export function updateGoogleFontsLink(html, googleFontsQuery) {
   return insertIntoHead(html, newLink);
 }
 
+// Extract the Google Fonts query string from existing HTML (the part after `family=`).
+export function extractGoogleFontsQuery(html) {
+  if (!html) return null;
+  const m = html.match(/fonts\.googleapis\.com\/css2\?family=([^"']+?)(?:&display=swap)?["']/i);
+  return m ? m[1] : null;
+}
+
 // Two-step: strip existing google fonts then insert fresh.
 export function setGoogleFonts(html, googleFontsQuery) {
   if (!html || googleFontsQuery == null) return html;

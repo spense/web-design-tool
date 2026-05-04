@@ -45,18 +45,16 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
             doc.documentElement.style.setProperty(k, v);
           }
         }
-        // Update Google Fonts link if present in new HTML
-        const fontMatch = newPageHtml.match(/<link[^>]+fonts\.googleapis\.com[^>]*>/i);
-        if (fontMatch) {
-          const existing = doc.querySelector('link[href*="fonts.googleapis.com"]');
+        // Sync all Google Fonts links (preconnects + stylesheet) to match new HTML
+        const newFontLinks = newPageHtml.match(/<link[^>]+fonts\.(googleapis|gstatic)\.com[^>]*>/gi) || [];
+        const oldFontLinks = doc.querySelectorAll('link[href*="fonts.googleapis.com"], link[href*="fonts.gstatic.com"]');
+        oldFontLinks.forEach(el => el.remove());
+        if (newFontLinks.length) {
+          const frag = doc.createDocumentFragment();
           const tmp = doc.createElement('div');
-          tmp.innerHTML = fontMatch[0];
-          const newLink = tmp.firstElementChild;
-          if (existing) {
-            existing.href = newLink.href;
-          } else {
-            doc.head.appendChild(newLink);
-          }
+          tmp.innerHTML = newFontLinks.join('');
+          while (tmp.firstChild) frag.appendChild(tmp.firstChild);
+          doc.head.appendChild(frag);
         }
       }
     } catch {}

@@ -77,6 +77,9 @@ MOBILE RESPONSIVENESS — NON-NEGOTIABLE:
 - At mobile: columns stack, fonts scale down, touch targets ≥ 44px, images fluid (max-width: 100%)
 - Test your mental model at 390px AND 1280px before finalizing
 
+HEADER / CONTENT ALIGNMENT:
+- When the header/nav uses the same \`max-width\` as content sections, its horizontal padding must not make its inner content appear narrower than the sections below it. The simplest fix: apply horizontal padding only below the max-width breakpoint (mobile/tablet, where content needs inset from screen edges). At wider viewports, \`max-width\` + \`margin: 0 auto\` already centers the content — extra padding just misaligns it. Alternatively, add the padding to the max-width (e.g. \`max-width: calc(1200px + 4rem)\` with \`padding: 0 2rem\`) so the usable inner width matches the sections.
+
 Design tokens — REQUIRED, this is non-negotiable:
 
 Every design must define a CSS variables block at the top of the stylesheet inside \`:root\` and use those variables throughout the design. This lets the user swap themes (colors/fonts/spacing) instantly via a Tools menu without re-running you.

@@ -3,7 +3,7 @@ import {
   colorThemes, fontPairings, sizingScales, spacingScales, radiusScales,
   buildSizingTokens, buildSpacingTokens, pickCategory,
 } from '../themePresets.js';
-import { extractTokens, applyToAllPages } from '../tokenRewriter.js';
+import { extractTokens, extractGoogleFontsQuery, applyToAllPages } from '../tokenRewriter.js';
 
 export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onApply, onClose }) {
   const ref = useRef(null);
@@ -13,7 +13,10 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
 
   // Snapshot original tokens the first time the menu opens for this project.
   useEffect(() => {
-    if (!snapshot && usable) onSnapshot(tokens);
+    if (!snapshot && usable) {
+      const fontsQuery = extractGoogleFontsQuery(html);
+      onSnapshot({ ...tokens, __googleFonts: fontsQuery });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -54,7 +57,18 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
     setActiveFont(pairing.id);
     if (pairing.id === 'original') {
       const restore = pickCategory(snapshot || tokens, 'font');
-      onApply(applyToAllPages(pages, { tokens: restore }));
+      let originalFonts = snapshot?.__googleFonts || null;
+      // Fallback: derive Google Fonts query from snapshot font names
+      if (!originalFonts && snapshot) {
+        const names = ['--font-heading', '--font-body']
+          .map(k => snapshot[k]?.split(',')[0]?.replace(/'/g, '').trim())
+          .filter(Boolean);
+        const unique = [...new Set(names)];
+        if (unique.length) {
+          originalFonts = unique.map(n => n.replace(/ /g, '+') + ':wght@400;500;600;700').join('&family=');
+        }
+      }
+      onApply(applyToAllPages(pages, { tokens: restore, googleFonts: originalFonts }));
       return;
     }
     const tokensPatch = {
@@ -108,9 +122,18 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
             if (p) applyFont(p);
           }}
         >
-          {fontPairings.map(p => (
-            <option key={p.id} value={p.id}>{p.label}</option>
-          ))}
+          {fontPairings.map(p => {
+            let label = p.label;
+            if (p.id === 'original' && snapshot) {
+              const h = snapshot['--font-heading'];
+              const b = snapshot['--font-body'];
+              const hName = h ? h.split(',')[0].replace(/'/g, '').trim() : null;
+              const bName = b ? b.split(',')[0].replace(/'/g, '').trim() : null;
+              if (hName && bName && hName !== bName) label = `Original (${hName}, ${bName})`;
+              else if (hName) label = `Original (${hName})`;
+            }
+            return <option key={p.id} value={p.id}>{label}</option>;
+          })}
         </select>
       </div>
 

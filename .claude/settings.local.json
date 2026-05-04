@@ -32,7 +32,10 @@
       "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/routes/export.js)",
       "Bash(node -e \"const fs = require\\('fs'\\); const data = JSON.parse\\(fs.readFileSync\\('/Users/spenserlea/Sites/web-design-tool/projects/abe-jones-v11-2026-05-01/pages.json', 'utf8'\\)\\); const index = data['index.html']; const matches = index.match\\(/href=\\\\\"[^\\\\\"]*\\\\\"/g\\); console.log\\(matches ? matches.slice\\(0, 20\\) : 'no matches'\\);\")",
       "Bash(python3 -c ' *)",
-      "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/parseFiles.js)"
+      "Bash(node --check /Users/spenserlea/Sites/web-design-tool/backend/parseFiles.js)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('tokenSnapshot keys:', list\\(d.get\\('tokenSnapshot',{}\\).keys\\(\\)\\)[:10] if d.get\\('tokenSnapshot'\\) else 'None'\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); ts=d.get\\('tokenSnapshot',{}\\); print\\('--font-heading:', ts.get\\('--font-heading'\\)\\); print\\('--font-body:', ts.get\\('--font-body'\\)\\); print\\('__googleFonts:', ts.get\\('__googleFonts'\\)\\)\")",
+      "Bash(mv /tmp/proj14.json /Users/spenserlea/Sites/web-design-tool/projects/abe-jones-v14-2026-05-04/project.json)"
     ]
   }
 }
