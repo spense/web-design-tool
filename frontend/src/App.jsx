@@ -8,7 +8,18 @@ export default function App() {
   const [config, setConfig] = useState(null);
   const [tabs, setTabs] = useState([]); // [{id, slug|null, name}]
   const [activeId, setActiveId] = useState(null);
+  const [streamingTabs, setStreamingTabs] = useState(() => new Set());
   const restoredRef = useRef(false);
+
+  const setTabStreaming = useCallback((id, isStreaming) => {
+    setStreamingTabs(prev => {
+      const has = prev.has(id);
+      if (isStreaming === has) return prev;
+      const next = new Set(prev);
+      if (isStreaming) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
 
   // Load config + restore tabs on mount
   useEffect(() => {
@@ -57,6 +68,16 @@ export default function App() {
   }, []);
 
   const closeTab = useCallback((id) => {
+    if (streamingTabs.has(id)) {
+      const ok = window.confirm('This tab is still generating a design. Closing will cancel it. Close anyway?');
+      if (!ok) return;
+    }
+    setStreamingTabs(prev => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
     setTabs(t => {
       const idx = t.findIndex(x => x.id === id);
       const next = t.filter(x => x.id !== id);
@@ -71,7 +92,7 @@ export default function App() {
       }
       return next;
     });
-  }, [activeId]);
+  }, [activeId, streamingTabs]);
 
   const updateTab = useCallback((id, patch) => {
     setTabs(t => t.map(x => x.id === id ? { ...x, ...patch } : x));
@@ -117,18 +138,29 @@ export default function App() {
         onAdd={addTab}
         onRename={renameTab}
       />
-      {activeTab && (
-        activeTab.slug
-          ? <ProjectView
-              key={activeTab.id}
-              tab={activeTab}
-              onUpdateTab={(patch) => updateTab(activeTab.id, patch)}
+      {tabs.map(t => (
+        <div
+          key={t.id}
+          className="tab-pane"
+          style={{ display: t.id === activeId ? 'contents' : 'none' }}
+        >
+          {t.slug ? (
+            <ProjectView
+              tab={t}
+              isActive={t.id === activeId}
+              onUpdateTab={(patch) => updateTab(t.id, patch)}
               hasApiKey={config?.hasApiKey}
+              onStreamingChange={(b) => setTabStreaming(t.id, b)}
             />
-          : <NewTabView
-              onProjectOpened={(project) => updateTab(activeTab.id, { slug: project.slug, name: project.name })}
-            />
-      )}
+          ) : (
+            t.id === activeId && (
+              <NewTabView
+                onProjectOpened={(project) => updateTab(t.id, { slug: project.slug, name: project.name })}
+              />
+            )
+          )}
+        </div>
+      ))}
     </div>
   );
 }

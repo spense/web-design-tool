@@ -52,11 +52,13 @@ export const api = {
 };
 
 // Streaming chat: calls onDelta(chunk) and resolves with full text on done.
-export async function streamChat({ model, messages, context, onDelta, signal }) {
+// Calls onJobId(jobId) as soon as the server assigns a job — use it to poll
+// if the connection drops before the 'done' event arrives.
+export async function streamChat({ model, messages, context, onDelta, onJobId, signal }) {
   const res = await fetch(API + '/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, context }), // messages may contain structured content arrays
+    body: JSON.stringify({ model, messages, context }),
     signal,
   });
   if (!res.ok || !res.body) {
@@ -67,6 +69,7 @@ export async function streamChat({ model, messages, context, onDelta, signal }) 
   const decoder = new TextDecoder();
   let buffer = '';
   let fullText = '';
+  let jobId = null;
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -83,7 +86,10 @@ export async function streamChat({ model, messages, context, onDelta, signal }) 
       }
       if (!data) continue;
       const parsed = JSON.parse(data);
-      if (event === 'delta') {
+      if (event === 'jobId') {
+        jobId = parsed.jobId;
+        onJobId?.(jobId);
+      } else if (event === 'delta') {
         fullText += parsed.delta;
         onDelta?.(parsed.delta, fullText);
       } else if (event === 'done') {
@@ -93,5 +99,24 @@ export async function streamChat({ model, messages, context, onDelta, signal }) 
       }
     }
   }
-  return { text: fullText, usage: null, stopReason: null };
+  // Connection dropped before 'done' — attach jobId so caller can poll.
+  const err = new Error('Stream connection dropped');
+  err.jobId = jobId;
+  throw err;
+}
+
+// Poll a background job until it completes or times out (10 min).
+export async function pollJobResult(jobId, { signal } = {}) {
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    await new Promise(r => setTimeout(r, 1500));
+    if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    const res = await fetch(`${API}/chat/${jobId}`, { signal });
+    if (!res.ok) throw new Error('Job not found or expired');
+    const job = await res.json();
+    if (job.status === 'done') return job.result;
+    if (job.status === 'error') throw new Error(job.error || 'Generation failed');
+  }
+  throw new Error('Generation timed out');
 }

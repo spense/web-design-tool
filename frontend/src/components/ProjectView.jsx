@@ -4,7 +4,7 @@ import ChatPanel from './ChatPanel.jsx';
 import PreviewPanel from './PreviewPanel.jsx';
 import ExportModal from './ExportModal.jsx';
 
-export default function ProjectView({ tab, onUpdateTab, hasApiKey }) {
+export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingChange }) {
   const [data, setData] = useState(null); // { project, pages, session }
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState('index.html');
@@ -79,6 +79,7 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey }) {
         activePage={activePage}
         onUpdate={updatePages}
         hasApiKey={hasApiKey}
+        onStreamingChange={onStreamingChange}
       />
       <PreviewPanel
         slug={tab.slug}

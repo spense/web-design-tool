@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { streamChat, api } from '../api.js';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { streamChat, pollJobResult, api } from '../api.js';
 import { parseFileBlocks, detectUrl, generationStartIndex, isCompleteHtmlDoc } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, editStartIndex } from '../parsePatch.js';
 import Spinner from './Spinner.jsx';
@@ -10,28 +10,175 @@ const MODELS = [
   { value: 'haiku', label: 'Haiku 4.5' },
 ];
 
-export default function ChatPanel({ project, pages, messages, activePage, onUpdate, hasApiKey }) {
+function formatDuration(secs) {
+  if (secs == null) return '';
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+export default function ChatPanel({ project, pages, messages, activePage, onUpdate, hasApiKey, onStreamingChange }) {
   const [input, setInput] = useState('');
   const [model, setModel] = useState(project.lastModel || 'sonnet');
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [crawling, setCrawling] = useState(false);
-  const [attachments, setAttachments] = useState([]); // [{id, name, kind, mediaType, data}]
+  const [attachments, setAttachments] = useState([]);
   const messagesRef = useRef(null);
   const panelRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
   const abortRef = useRef(null);
-  // Snapshot of messages before the current send, so an abort can roll back.
   const preSendMessagesRef = useRef(null);
   const preSendProjectRef = useRef(null);
+  const jobIdRef = useRef(null);
+  const streamStartRef = useRef(null);
+  const applyResultRef = useRef(null);
+
+  // Extract result processing so both send() and the reconnect effect can call it.
+  const applyResult = useCallback((result, baseMessages, baseProject, usedModel, elapsedSecs) => {
+    const fullText = result.text;
+    const usage = result.usage;
+    const truncated = result.stopReason === 'max_tokens';
+
+    const { edits, prose: patchProse } = parsePatchBlocks(fullText);
+    const editFiles = Object.keys(edits);
+    const { files, prose: fileProse } = parseFileBlocks(fullText);
+
+    const rejectedFiles = [];
+    const safeFiles = {};
+    for (const [name, html] of Object.entries(files)) {
+      if (isCompleteHtmlDoc(html)) {
+        safeFiles[name] = html;
+      } else {
+        rejectedFiles.push(name);
+      }
+    }
+    const fileNames = Object.keys(safeFiles);
+
+    let updatedPages = { ...pages, ...safeFiles };
+    let appliedSummary = [];
+    const failureMessages = [];
+
+    if (rejectedFiles.length > 0) {
+      const list = rejectedFiles.map(n => `  • ${n}`).join('\n');
+      failureMessages.push({
+        role: 'system',
+        content: `Skipped writing incomplete file(s) (the response was cut off before the page finished):\n${list}\n\nAsk me to regenerate ${rejectedFiles.length === 1 ? 'that page' : 'those pages'}, or break the request into smaller asks.`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    if (truncated) {
+      failureMessages.push({
+        role: 'system',
+        content: `Response hit the output token limit and was truncated. Any partial files above were discarded. Try again with a smaller change, or split the request across multiple turns.`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    if (editFiles.length > 0) {
+      const patchResult = applyPatches(updatedPages, edits);
+      updatedPages = patchResult.updatedPages;
+      for (const [name, count] of Object.entries(patchResult.applied)) {
+        appliedSummary.push(`${name} (${count} edit${count === 1 ? '' : 's'})`);
+      }
+      if (patchResult.failed.length > 0) {
+        const failed = patchResult.failed.map(f => `  • ${f.filename}: ${f.reason === 'not_found' ? 'file not found' : "couldn't find SEARCH block"}`).join('\n');
+        failureMessages.push({
+          role: 'system',
+          content: `Patch failed for:\n${failed}\n\nAsk me to try again, or request a full rewrite of the affected file(s).`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    if (fileNames.length > 0) {
+      const wroteNew = fileNames.filter(n => !pages[n]);
+      const wroteUpdated = fileNames.filter(n => pages[n]);
+      if (wroteNew.length) appliedSummary.push(`new: ${wroteNew.join(', ')}`);
+      if (wroteUpdated.length) appliedSummary.push(`rewrote: ${wroteUpdated.join(', ')}`);
+    }
+
+    const prose = editFiles.length > 0 ? patchProse : fileProse;
+    let displayContent = prose;
+    if (!displayContent) {
+      const didSomething = editFiles.length > 0 || fileNames.length > 0;
+      displayContent = didSomething
+        ? (Object.keys(pages).length > 0 ? 'Design updated.' : 'Design generated.')
+        : '(empty response)';
+    }
+
+    const assistantMsg = {
+      role: 'assistant',
+      content: displayContent,
+      model: usedModel,
+      timestamp: new Date().toISOString(),
+      files: appliedSummary,
+      usage,
+      duration: elapsedSecs,
+    };
+    const finalMessages = [...baseMessages, assistantMsg, ...failureMessages];
+    const finalProject = {
+      ...baseProject,
+      modelHistory: [...(baseProject.modelHistory || []), { model: usedModel, at: new Date().toISOString() }],
+    };
+
+    onUpdate(updatedPages, finalMessages, finalProject);
+    setStreaming(false);
+    setStreamingText('');
+  }, [pages, onUpdate]);
+
+  // Keep a ref so the reconnect effect always calls the latest version.
+  applyResultRef.current = applyResult;
+
+  // On mount: reconnect to any in-progress generation that survived a page refresh.
+  useEffect(() => {
+    const storageKey = `gen:${project.slug}`;
+    const stored = localStorage.getItem(storageKey);
+    if (!stored) return;
+    let info;
+    try { info = JSON.parse(stored); } catch { localStorage.removeItem(storageKey); return; }
+
+    // If the session already has an assistant response, the generation completed before refresh.
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role === 'assistant') { localStorage.removeItem(storageKey); return; }
+
+    const { jobId, startedAt, model: savedModel } = info;
+    jobIdRef.current = jobId;
+    streamStartRef.current = startedAt;
+    setStreaming(true);
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    pollJobResult(jobId, { signal: ctrl.signal })
+      .then(result => {
+        localStorage.removeItem(storageKey);
+        const elapsedSecs = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : null;
+        applyResultRef.current(result, messages, project, savedModel, elapsedSecs);
+      })
+      .catch(e => {
+        if (e.name === 'AbortError') return;
+        localStorage.removeItem(storageKey);
+        const errMsg = { role: 'system', content: `Error: ${e.message}`, timestamp: new Date().toISOString() };
+        onUpdate(undefined, [...messages, errMsg], project);
+        setStreaming(false);
+      })
+      .finally(() => {
+        if (abortRef.current === ctrl) abortRef.current = null;
+        jobIdRef.current = null;
+        streamStartRef.current = null;
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stopStream = () => {
     abortRef.current?.abort();
     abortRef.current = null;
+    if (project?.slug) localStorage.removeItem(`gen:${project.slug}`);
+    streamStartRef.current = null;
+    jobIdRef.current = null;
     setStreaming(false);
     setStreamingText('');
-    // Roll back the user message that was added before the request started.
     if (preSendMessagesRef.current) {
       onUpdate(undefined, preSendMessagesRef.current, preSendProjectRef.current);
       preSendMessagesRef.current = null;
@@ -41,7 +188,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
 
   const handleAttach = async (e) => {
     const files = Array.from(e.target.files || []);
-    e.target.value = ''; // allow re-selecting the same file
+    e.target.value = '';
     const newOnes = [];
     for (const file of files) {
       const isImage = file.type.startsWith('image/');
@@ -49,18 +196,16 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       if (!isImage && !isText) continue;
       try {
         if (isImage) {
-          // Upload to backend; reference by filename instead of sending bytes to API.
           const meta = await api.uploadAsset(project.slug, file);
           newOnes.push({
             id: Math.random().toString(36).slice(2, 10),
-            name: meta.filename,           // canonical (sanitized) filename on disk
+            name: meta.filename,
             displayName: file.name,
             kind: 'image-ref',
             mediaType: meta.mediaType,
             sizeBytes: meta.sizeBytes,
           });
         } else {
-          // Text/HTML: still inline content into the API call so the model can read it.
           const data = await readAsText(file);
           newOnes.push({
             id: Math.random().toString(36).slice(2, 10),
@@ -84,7 +229,14 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight });
   }, [messages, streamingText, crawling]);
 
-  // Auto-grow textarea up to 50% of chat panel height, then scroll inside.
+  useEffect(() => {
+    onStreamingChange?.(streaming || crawling);
+  }, [streaming, crawling, onStreamingChange]);
+
+  useEffect(() => {
+    return () => { onStreamingChange?.(false); };
+  }, [onStreamingChange]);
+
   useEffect(() => {
     const ta = textareaRef.current;
     const panel = panelRef.current;
@@ -127,12 +279,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       }
     }
 
-    // Build the LIVE user message content (sent to API). May be a structured
-    // array if attachments are present.
     const liveContent = buildUserContent(text, attachments);
-
-    // Saved-to-history version: just the prompt text + a small note about
-    // what was attached. We don't persist base64 image data in session.json.
     const savedContent = attachments.length > 0
       ? `${text}\n\n[Attached: ${attachments.map(a => a.name).join(', ')}]`
       : text;
@@ -142,18 +289,13 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     if (crawlMessage) newMessages.push(crawlMessage);
     newMessages.push(userMsg);
 
-    // Snapshot pre-send state in case the user aborts.
     preSendMessagesRef.current = messages;
     preSendProjectRef.current = project;
-
     onUpdate(undefined, newMessages, updatedProject);
 
-    // Clear attachments now that they're committed to this turn.
     const sentAttachments = attachments;
     setAttachments([]);
 
-    // History messages stay as plain text strings; only the latest user
-    // message uses structured content (so attachments hit the API).
     const apiMessages = newMessages
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map((m, i, arr) => {
@@ -166,8 +308,12 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
 
     setStreaming(true);
     setStreamingText('');
-    let result;
+    streamStartRef.current = Date.now();
     abortRef.current = new AbortController();
+
+    const storageKey = `gen:${project.slug}`;
+
+    let result;
     try {
       result = await streamChat({
         model,
@@ -178,119 +324,55 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           currentPages: pages,
         },
         onDelta: (_d, full) => setStreamingText(full),
+        onJobId: (jid) => {
+          jobIdRef.current = jid;
+          localStorage.setItem(storageKey, JSON.stringify({
+            jobId: jid,
+            startedAt: streamStartRef.current,
+            model,
+          }));
+        },
         signal: abortRef.current.signal,
       });
     } catch (e) {
-      // User-initiated abort: stopStream() already rolled back state.
       if (e.name === 'AbortError' || abortRef.current?.signal.aborted) {
+        localStorage.removeItem(storageKey);
         return;
       }
-      const errMsg = { role: 'system', content: `Error: ${e.message}`, timestamp: new Date().toISOString() };
-      onUpdate(undefined, [...newMessages, errMsg], updatedProject);
-      setStreaming(false);
-      setStreamingText('');
-      return;
+      // Stream dropped — fall back to polling if we have a jobId.
+      const jid = e.jobId || jobIdRef.current;
+      if (jid) {
+        try {
+          result = await pollJobResult(jid, { signal: abortRef.current?.signal });
+        } catch (pollErr) {
+          if (pollErr.name === 'AbortError') { localStorage.removeItem(storageKey); return; }
+          localStorage.removeItem(storageKey);
+          const errMsg = { role: 'system', content: `Error: ${pollErr.message}`, timestamp: new Date().toISOString() };
+          onUpdate(undefined, [...newMessages, errMsg], updatedProject);
+          setStreaming(false);
+          setStreamingText('');
+          return;
+        }
+      } else {
+        localStorage.removeItem(storageKey);
+        const errMsg = { role: 'system', content: `Error: ${e.message}`, timestamp: new Date().toISOString() };
+        onUpdate(undefined, [...newMessages, errMsg], updatedProject);
+        setStreaming(false);
+        setStreamingText('');
+        return;
+      }
     } finally {
       abortRef.current = null;
       preSendMessagesRef.current = null;
       preSendProjectRef.current = null;
+      jobIdRef.current = null;
     }
 
-    const fullText = result.text;
-    const usage = result.usage;
-    const truncated = result.stopReason === 'max_tokens';
+    localStorage.removeItem(storageKey);
+    const elapsedSecs = streamStartRef.current ? Math.floor((Date.now() - streamStartRef.current) / 1000) : null;
+    streamStartRef.current = null;
 
-    // Try patches first; if any present, apply to existing pages.
-    const { edits, prose: patchProse } = parsePatchBlocks(fullText);
-    const editFiles = Object.keys(edits);
-
-    // Then look for full FILE blocks (new files / wholesale rewrites).
-    const { files, prose: fileProse } = parseFileBlocks(fullText);
-
-    // Guard against truncated FULL FILE emits silently overwriting good files.
-    // If a page didn't make it to </html>, drop it from the persist set.
-    const rejectedFiles = [];
-    const safeFiles = {};
-    for (const [name, html] of Object.entries(files)) {
-      if (isCompleteHtmlDoc(html)) {
-        safeFiles[name] = html;
-      } else {
-        rejectedFiles.push(name);
-      }
-    }
-    const fileNames = Object.keys(safeFiles);
-
-    let updatedPages = { ...pages, ...safeFiles };
-    let appliedSummary = [];
-    const failureMessages = [];
-
-    if (rejectedFiles.length > 0) {
-      const list = rejectedFiles.map(n => `  • ${n}`).join('\n');
-      failureMessages.push({
-        role: 'system',
-        content: `Skipped writing incomplete file(s) (the response was cut off before the page finished):\n${list}\n\nAsk me to regenerate ${rejectedFiles.length === 1 ? 'that page' : 'those pages'}, or break the request into smaller asks.`,
-        timestamp: new Date().toISOString(),
-      });
-    }
-    if (truncated) {
-      failureMessages.push({
-        role: 'system',
-        content: `Response hit the output token limit and was truncated. Any partial files above were discarded. Try again with a smaller change, or split the request across multiple turns.`,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    if (editFiles.length > 0) {
-      const result = applyPatches(updatedPages, edits);
-      updatedPages = result.updatedPages;
-      for (const [name, count] of Object.entries(result.applied)) {
-        appliedSummary.push(`${name} (${count} edit${count === 1 ? '' : 's'})`);
-      }
-      if (result.failed.length > 0) {
-        const failed = result.failed.map(f => `  • ${f.filename}: ${f.reason === 'not_found' ? 'file not found' : "couldn't find SEARCH block"}`).join('\n');
-        failureMessages.push({
-          role: 'system',
-          content: `Patch failed for:\n${failed}\n\nAsk me to try again, or request a full rewrite of the affected file(s).`,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-
-    if (fileNames.length > 0) {
-      const wroteNew = fileNames.filter(n => !pages[n]);
-      const wroteUpdated = fileNames.filter(n => pages[n]);
-      if (wroteNew.length) appliedSummary.push(`new: ${wroteNew.join(', ')}`);
-      if (wroteUpdated.length) appliedSummary.push(`rewrote: ${wroteUpdated.join(', ')}`);
-    }
-
-    // Pick whichever prose we got (patch-mode prose if there are patches, else file-mode prose).
-    const prose = editFiles.length > 0 ? patchProse : fileProse;
-    let displayContent = prose;
-    if (!displayContent) {
-      const didSomething = editFiles.length > 0 || fileNames.length > 0;
-      displayContent = didSomething
-        ? (Object.keys(pages).length > 0 ? 'Design updated.' : 'Design generated.')
-        : '(empty response)';
-    }
-
-    const assistantMsg = {
-      role: 'assistant',
-      content: displayContent,
-      model,
-      timestamp: new Date().toISOString(),
-      files: appliedSummary,
-      usage,
-    };
-    const finalMessages = [...newMessages, assistantMsg, ...failureMessages];
-
-    const finalProject = {
-      ...updatedProject,
-      modelHistory: [...(updatedProject.modelHistory || []), { model, at: new Date().toISOString() }],
-    };
-
-    onUpdate(updatedPages, finalMessages, finalProject);
-    setStreaming(false);
-    setStreamingText('');
+    applyResultRef.current(result, newMessages, updatedProject, model, elapsedSecs);
   };
 
   const handleKey = (e) => {
@@ -315,6 +397,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
             text={streamingText}
             model={model}
             isUpdate={Object.keys(pages || {}).length > 0}
+            startedAt={streamStartRef.current}
           />
         )}
       </div>
@@ -382,27 +465,36 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   );
 }
 
-function StreamingMessage({ text, model, isUpdate }) {
+function StreamingMessage({ text, model, isUpdate, startedAt }) {
+  const [elapsed, setElapsed] = useState(
+    startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0
+  );
+
+  useEffect(() => {
+    if (!startedAt) return;
+    const iv = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [startedAt]);
+
   const editIdx = editStartIndex(text);
   const genIdx = generationStartIndex(text);
-  const idx = genIdx;
-  const proseOnly = idx === -1 ? text : text.slice(0, idx).trim();
-  const generating = idx !== -1;
-  // Pick label: EDIT mode → "Applying edits"; otherwise generate vs update.
+  const proseOnly = genIdx === -1 ? text : text.slice(0, genIdx).trim();
+  const generating = genIdx !== -1;
   let label;
   if (editIdx !== -1) label = 'Applying edits';
   else if (isUpdate) label = 'Updating design';
   else label = 'Generating design';
+
   return (
     <div className="chat-msg assistant">
       <div className="who">assistant · {model}</div>
       <div className="body">
         {proseOnly}
-        {generating && (
-          <span className="gen-status" style={{ marginTop: proseOnly ? 8 : 0, display: 'flex' }}>
-            <Spinner /> {label}…
-          </span>
-        )}
+        <span className="gen-status" style={{ marginTop: proseOnly ? 8 : 0, display: 'flex' }}>
+          <Spinner /> {label}… ({formatDuration(elapsed)})
+        </span>
       </div>
     </div>
   );
@@ -415,6 +507,7 @@ function Message({ msg }) {
     <div className={`chat-msg ${msg.role}`}>
       <div className="who">
         {msg.role}{msg.model ? ` · ${msg.model}` : ''}
+        {msg.duration != null ? ` (${formatDuration(msg.duration)})` : ''}
       </div>
       <div className="body">{msg.content}</div>
       {msg.files?.length > 0 && (
@@ -431,14 +524,11 @@ function Message({ msg }) {
   );
 }
 
-// Build an Anthropic content array from prompt text + attachments.
-// Returns a plain string when there are no attachments (to keep simple turns simple).
 function buildUserContent(text, attachments) {
   if (!attachments || attachments.length === 0) return text;
   const blocks = [];
   if (text.trim()) blocks.push({ type: 'text', text });
 
-  // Group image references into a single concise note so the model knows what to use.
   const imageRefs = attachments.filter(a => a.kind === 'image-ref');
   if (imageRefs.length > 0) {
     const list = imageRefs.map(a => `- uploads/${a.name} (${a.mediaType})`).join('\n');
@@ -455,7 +545,6 @@ function buildUserContent(text, attachments) {
         text: `--- Attached file: ${a.name} ---\n${a.data}\n--- End of ${a.name} ---`,
       });
     }
-    // image-ref handled above; old 'image' kind no longer used
   }
   return blocks;
 }
@@ -476,18 +565,6 @@ function StopIcon() {
   );
 }
 
-function readAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => {
-      const result = r.result; // data:image/...;base64,XXXX
-      const idx = String(result).indexOf(',');
-      resolve(idx >= 0 ? String(result).slice(idx + 1) : String(result));
-    };
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-}
 function readAsText(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();

@@ -104,10 +104,57 @@ function applyOne(haystack, search, replace) {
     }
   }
   const normIdx = normHaystack.indexOf(normSearch);
-  if (normIdx === -1) return null;
-  const startOrig = map[normIdx];
-  const endOrig = map[normIdx + normSearch.length - 1] + 1;
-  return haystack.slice(0, startOrig) + replace + haystack.slice(endOrig);
+  if (normIdx !== -1) {
+    const startOrig = map[normIdx];
+    const endOrig = map[normIdx + normSearch.length - 1] + 1;
+    return haystack.slice(0, startOrig) + replace + haystack.slice(endOrig);
+  }
+
+  // 3. Line-based fuzzy match: when the model misremembers a few characters
+  //    (e.g. a CSS value or attribute), find the best contiguous block of
+  //    lines where most lines match after trimming.
+  return tryFuzzyLineMatch(haystack, search, replace);
+}
+
+function tryFuzzyLineMatch(haystack, search, replace) {
+  const searchLines = search.split('\n');
+  const haystackLines = haystack.split('\n');
+  const searchTrimmed = searchLines.map(l => l.trim());
+  const haystackTrimmed = haystackLines.map(l => l.trim());
+
+  // Need at least 2 non-empty search lines to anchor reliably.
+  const nonEmpty = searchTrimmed.filter(Boolean);
+  if (nonEmpty.length < 2) return null;
+
+  const firstAnchor = nonEmpty[0];
+  const len = searchTrimmed.length;
+  let bestStart = -1;
+  let bestScore = 0;
+
+  for (let i = 0; i <= haystackTrimmed.length - len; i++) {
+    // First non-empty search line must appear at the right offset to anchor.
+    const anchorOffset = searchTrimmed.indexOf(firstAnchor);
+    if (haystackTrimmed[i + anchorOffset] !== firstAnchor) continue;
+
+    let matches = 0;
+    let total = 0;
+    for (let j = 0; j < len; j++) {
+      if (!searchTrimmed[j] && !haystackTrimmed[i + j]) continue;
+      total++;
+      if (searchTrimmed[j] === haystackTrimmed[i + j]) matches++;
+    }
+    const score = total > 0 ? matches / total : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      bestStart = i;
+    }
+  }
+
+  if (bestScore < 0.6 || bestStart === -1) return null;
+
+  const before = haystackLines.slice(0, bestStart);
+  const after = haystackLines.slice(bestStart + len);
+  return [...before, replace, ...after].join('\n');
 }
 
 // Detect whether a partial stream contains an EDIT block — used for the

@@ -1,18 +1,24 @@
 import { Router } from 'express';
+import { randomUUID } from 'crypto';
 import { getAnthropic, resolveModel, SYSTEM_PROMPT } from '../anthropic.js';
 
 const router = Router();
 
-// Streaming chat: forwards Anthropic SSE to the client.
-// Body: { model: 'sonnet'|'opus'|'haiku', messages: [{role,content}], context: {...} }
+// In-memory job store: survives client disconnects and tab switches.
+const jobs = new Map();
+
+router.get('/:jobId', (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found or expired' });
+  res.json({ status: job.status, result: job.result || null, error: job.error || null });
+});
+
 router.post('/', async (req, res, next) => {
   try {
     const { model, messages, context } = req.body || {};
     const client = getAnthropic();
+    const jobId = randomUUID();
 
-    // Split system into a CACHED prefix (system prompt + crawl data — stable
-    // within a project) and an UNCACHED suffix (active page + current pages —
-    // changes every turn).
     let cachedSystem = SYSTEM_PROMPT;
     if (context?.crawledData) {
       cachedSystem += `\n\n--- INTAKE DATA (crawled from ${context.crawledData.startUrl}) ---\n${JSON.stringify(context.crawledData, null, 2)}`;
@@ -32,14 +38,29 @@ router.post('/', async (req, res, next) => {
     const systemBlocks = [
       { type: 'text', text: cachedSystem, cache_control: { type: 'ephemeral' } },
     ];
-    if (dynamicSystem) {
-      systemBlocks.push({ type: 'text', text: dynamicSystem });
-    }
+    if (dynamicSystem) systemBlocks.push({ type: 'text', text: dynamicSystem });
+
+    const job = { status: 'running', fullText: '', result: null, error: null };
+    jobs.set(jobId, job);
+    // Expire job after 10 minutes regardless of outcome.
+    setTimeout(() => jobs.delete(jobId), 10 * 60 * 1000);
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders?.();
+
+    // Send jobId first so the client can poll if the connection drops.
+    res.write(`event: jobId\ndata: ${JSON.stringify({ jobId })}\n\n`);
+
+    let clientConnected = true;
+    req.on('close', () => { clientConnected = false; });
+
+    const safeWrite = (chunk) => {
+      if (clientConnected && !res.writableEnded) {
+        try { res.write(chunk); } catch {}
+      }
+    };
 
     const stream = client.messages.stream({
       model: resolveModel(model),
@@ -48,21 +69,23 @@ router.post('/', async (req, res, next) => {
       messages,
     });
 
-    let fullText = '';
     stream.on('text', (delta) => {
-      fullText += delta;
-      res.write(`event: delta\ndata: ${JSON.stringify({ delta })}\n\n`);
+      job.fullText += delta;
+      safeWrite(`event: delta\ndata: ${JSON.stringify({ delta })}\n\n`);
     });
+
     stream.on('error', (err) => {
-      res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
-      res.end();
+      job.status = 'error';
+      job.error = err.message;
+      safeWrite(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+      if (!res.writableEnded) try { res.end(); } catch {}
     });
 
     try {
       const finalMessage = await stream.finalMessage();
       const usage = finalMessage.usage || {};
       const stats = {
-        text: fullText,
+        text: job.fullText,
         stopReason: finalMessage.stop_reason || null,
         usage: {
           input_tokens: usage.input_tokens ?? 0,
@@ -72,20 +95,21 @@ router.post('/', async (req, res, next) => {
         },
       };
       console.log(`[chat] model=${resolveModel(model)} stop=${stats.stopReason} in=${stats.usage.input_tokens} out=${stats.usage.output_tokens} cache_write=${stats.usage.cache_creation_input_tokens} cache_read=${stats.usage.cache_read_input_tokens}`);
-      res.write(`event: done\ndata: ${JSON.stringify(stats)}\n\n`);
-      res.end();
+      job.status = 'done';
+      job.result = stats;
+      safeWrite(`event: done\ndata: ${JSON.stringify(stats)}\n\n`);
+      if (!res.writableEnded) try { res.end(); } catch {}
     } catch (err) {
-      // error already sent via stream.on('error') above; ensure response closes
-      if (!res.writableEnded) res.end();
+      if (!res.writableEnded) try { res.end(); } catch {}
     }
-
-    req.on('close', () => {
-      try { stream.controller?.abort(); } catch {}
-    });
   } catch (e) {
     if (!res.headersSent) return next(e);
-    res.write(`event: error\ndata: ${JSON.stringify({ error: e.message })}\n\n`);
-    res.end();
+    if (!res.writableEnded) {
+      try {
+        res.write(`event: error\ndata: ${JSON.stringify({ error: e.message })}\n\n`);
+        res.end();
+      } catch {}
+    }
   }
 });
 
