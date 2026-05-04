@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   colorThemes, fontPairings, sizingScales, spacingScales, radiusScales,
-  buildSpacingTokens, pickCategory,
+  buildSizingTokens, buildSpacingTokens, pickCategory,
 } from '../themePresets.js';
 import { extractTokens, applyToAllPages } from '../tokenRewriter.js';
 
@@ -28,7 +28,7 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
 
   // Track active selections per category. Color & font we just remember the
   // last click; size/spacing/radius we infer from the actual token values.
-  const inferredSizing = useMemo(() => inferSizing(tokens), [tokens]);
+  const inferredSizing = useMemo(() => inferSizing(tokens, snapshot), [tokens, snapshot]);
   const inferredRadius = useMemo(() => inferRadius(tokens), [tokens]);
   const inferredSpacing = useMemo(() => inferSpacing(tokens, snapshot), [tokens, snapshot]);
 
@@ -64,7 +64,13 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
     onApply(applyToAllPages(pages, { tokens: tokensPatch, googleFonts: pairing.googleFonts }));
   };
   const applySizing = (scale) => {
-    onApply(applyToAllPages(pages, { tokens: scale.vars }));
+    if (scale.id === 'default') {
+      const restore = pickCategory(snapshot || tokens, 'sizing');
+      onApply(applyToAllPages(pages, { tokens: restore }));
+      return;
+    }
+    const next = buildSizingTokens(tokens, snapshot, scale.multiplier);
+    onApply(applyToAllPages(pages, { tokens: next }));
   };
   const applySpacing = (scale) => {
     const next = buildSpacingTokens(tokens, snapshot, scale.multiplier);
@@ -173,11 +179,15 @@ function Segment({ options, activeId, onPick }) {
 
 // ─── inference ──────────────────────────────────────────────────────────────
 
-function inferSizing(tokens) {
-  const base = tokens['--font-size-base'];
-  if (!base) return 'medium';
-  const m = sizingScales.find(s => s.vars['--font-size-base'] === base);
-  return m?.id || 'medium';
+function inferSizing(tokens, snapshot) {
+  const snapBase = snapshot?.['--font-size-base'];
+  const currBase = tokens['--font-size-base'];
+  if (!snapBase || !currBase) return 'default';
+  const ratio = parseFloat(currBase) / parseFloat(snapBase);
+  if (isNaN(ratio)) return 'default';
+  if (Math.abs(ratio - 0.85) < 0.04) return 'small';
+  if (Math.abs(ratio - 1.25) < 0.04) return 'large';
+  return 'default';
 }
 
 function inferRadius(tokens) {

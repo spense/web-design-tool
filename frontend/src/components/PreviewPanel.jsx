@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Spinner from './Spinner.jsx';
 import ToolsMenu from './ToolsMenu.jsx';
+import { extractTokens } from '../tokenRewriter.js';
 
 const VIEWPORTS = {
   desktop: { label: 'Desktop', width: '100%' },
@@ -14,10 +15,53 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   const [toolsOpen, setToolsOpen] = useState(false);
   const iframeRef = useRef(null);
   const pageDropdownRef = useRef(null);
+  const toolsUpdateRef = useRef(false);
+  const [displayHtml, setDisplayHtml] = useState('');
+
   const pageNames = Object.keys(pages || {});
   const rawHtml = pages?.[activePage] || '';
-  // Rewrite `uploads/foo.jpg` → absolute backend URL so srcDoc iframes can load them.
   const html = rawHtml ? rewriteUploadsUrls(rawHtml, slug) : '';
+
+  // Sync displayHtml from non-tools changes (chat responses, page switches).
+  useEffect(() => {
+    if (toolsUpdateRef.current) {
+      toolsUpdateRef.current = false;
+      return;
+    }
+    setDisplayHtml(html);
+  }, [html]);
+
+  const handleApplyTokens = (newPages) => {
+    toolsUpdateRef.current = true;
+    // Apply CSS vars + fonts directly to live iframe DOM (no reload, scroll preserved)
+    try {
+      const iframe = iframeRef.current;
+      const doc = iframe?.contentDocument;
+      if (doc) {
+        const newPageHtml = newPages[activePage] || Object.values(newPages)[0] || '';
+        const newTokens = extractTokens(newPageHtml);
+        if (newTokens) {
+          for (const [k, v] of Object.entries(newTokens)) {
+            doc.documentElement.style.setProperty(k, v);
+          }
+        }
+        // Update Google Fonts link if present in new HTML
+        const fontMatch = newPageHtml.match(/<link[^>]+fonts\.googleapis\.com[^>]*>/i);
+        if (fontMatch) {
+          const existing = doc.querySelector('link[href*="fonts.googleapis.com"]');
+          const tmp = doc.createElement('div');
+          tmp.innerHTML = fontMatch[0];
+          const newLink = tmp.firstElementChild;
+          if (existing) {
+            existing.href = newLink.href;
+          } else {
+            doc.head.appendChild(newLink);
+          }
+        }
+      }
+    } catch {}
+    onApplyTokens(newPages);
+  };
 
   // Close page dropdown on outside click (parent doc).
   useEffect(() => {
@@ -40,7 +84,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   };
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (!iframe || !html) return;
+    if (!iframe || !displayHtml) return;
     const onLoad = () => {
       try {
         const doc = iframe.contentDocument;
@@ -66,7 +110,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     };
     iframe.addEventListener('load', onLoad);
     return () => iframe.removeEventListener('load', onLoad);
-  }, [html, pages, onActivePage]);
+  }, [displayHtml, pages, onActivePage]);
 
   const [copied, setCopied] = useState(false);
   const copyHtml = async () => {
@@ -120,7 +164,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 activePage={activePage}
                 snapshot={snapshot}
                 onSnapshot={onSnapshot}
-                onApply={onApplyTokens}
+                onApply={handleApplyTokens}
                 onClose={() => setToolsOpen(false)}
               />
             )}
@@ -148,11 +192,11 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
         </div>
       </div>
       <div className="preview-frame-wrap">
-        {html ? (
+        {displayHtml ? (
           <iframe
             ref={iframeRef}
             className="preview-frame"
-            srcDoc={html}
+            srcDoc={displayHtml}
             title={activePage}
             style={{
               width: VIEWPORTS[viewport].width,

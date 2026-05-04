@@ -171,17 +171,29 @@ export const fontPairings = [
 // ─── Sizing scales (font-size) ──────────────────────────────────────────────
 
 export const sizingScales = [
-  { id: 'small',  label: 'S', vars: { '--font-size-base': '14px', '--font-size-h1': '2.5rem',  '--font-size-h2': '1.875rem', '--font-size-h3': '1.25rem' } },
-  { id: 'medium', label: 'M', vars: { '--font-size-base': '16px', '--font-size-h1': '3rem',    '--font-size-h2': '2.25rem',  '--font-size-h3': '1.5rem'  } },
-  { id: 'large',  label: 'L', vars: { '--font-size-base': '18px', '--font-size-h1': '3.75rem', '--font-size-h2': '2.75rem',  '--font-size-h3': '1.75rem' } },
+  { id: 'default', label: 'Default', multiplier: null  },
+  { id: 'small',   label: 'Small',   multiplier: 0.85  },
+  { id: 'large',   label: 'Large',   multiplier: 1.25  },
 ];
+
+const SIZING_KEYS = ['--font-size-base', '--font-size-h1', '--font-size-h2', '--font-size-h3'];
+
+export function buildSizingTokens(currentTokens, snapshotTokens, multiplier) {
+  const next = { ...currentTokens };
+  const base = snapshotTokens || currentTokens;
+  for (const key of SIZING_KEYS) {
+    const v = base[key];
+    if (v) next[key] = scaleCssLength(v, multiplier);
+  }
+  return next;
+}
 
 // ─── Spacing scales (multipliers on current --space-* values) ───────────────
 
 export const spacingScales = [
-  { id: 'compact',     label: 'Compact',     multiplier: 0.7 },
+  { id: 'compact',     label: 'Compact',     multiplier: 0.6 },
   { id: 'comfortable', label: 'Comfortable', multiplier: 1.0 },
-  { id: 'roomy',       label: 'Roomy',       multiplier: 1.4 },
+  { id: 'roomy',       label: 'Roomy',       multiplier: 1.5 },
 ];
 
 // ─── Border radius scales ───────────────────────────────────────────────────
