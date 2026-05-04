@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import { getProject, projectDir } from '../storage.js';
 import { getAnthropic, resolveModel, EXPORT_SYSTEM_PROMPT } from '../anthropic.js';
 import { parseFileBlocks } from '../parseFiles.js';
+import { extractAndDedupCss } from '../cssExtractor.js';
 
 const router = Router();
 
@@ -41,17 +42,27 @@ router.post('/:slug', async (req, res, next) => {
     const exportDir = path.join(projectDir(slug), 'exports', `design-reference-${timestamp}`);
     await fs.mkdir(exportDir, { recursive: true });
 
+    // Lift inline <style> blocks out into shared/page-specific CSS files.
+    // After this pass, each HTML page references stylesheets via <link> tags.
+    const { pages: rewrittenPages, css: extractedCss } = extractAndDedupCss(pages);
+
     // In the working project, image paths use `uploads/...` (matches on-disk
     // layout). In the export, rename that folder to `assets/` and rewrite
     // references in HTML/CSS so paths resolve in the unpacked zip.
-    const rewritePaths = (content, name) =>
-      name.endsWith('.html') ? content.replace(/(["'(=\s])uploads\//g, '$1assets/') : content;
+    const rewriteUploads = (s) => s.replace(/(["'(=\s])uploads\//g, '$1assets/');
 
-    const allFiles = Object.fromEntries(
-      Object.entries({ ...pages, ...docFiles }).map(([n, c]) => [n, rewritePaths(c, n)])
+    const htmlFiles = Object.fromEntries(
+      Object.entries(rewrittenPages).map(([n, c]) => [n, rewriteUploads(c)])
     );
+    const cssFiles = Object.fromEntries(
+      Object.entries(extractedCss).map(([n, c]) => [n, rewriteUploads(c)])
+    );
+    const allFiles = { ...htmlFiles, ...cssFiles, ...docFiles };
+
     for (const [name, content] of Object.entries(allFiles)) {
-      await fs.writeFile(path.join(exportDir, name), content, 'utf8');
+      const fullPath = path.join(exportDir, name);
+      await fs.mkdir(path.dirname(fullPath), { recursive: true });
+      await fs.writeFile(fullPath, content, 'utf8');
     }
 
     const uploadsDir = path.join(projectDir(slug), 'uploads');
