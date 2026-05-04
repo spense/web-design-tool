@@ -23,54 +23,77 @@ export const colorThemes = [
     },
   },
   {
-    id: 'dark',
-    label: 'Dark',
-    description: 'Dark surfaces, brand color preserved',
-    swatch: ['#0f1115', '#7c9cff'],
-    build: (current) => ({
-      ...current,
-      '--color-bg': '#0f1115',
-      '--color-surface': '#1a1d24',
-      '--color-text': '#e6e8ee',
-      '--color-text-muted': '#9aa3b3',
-      '--color-border': '#2a2f3a',
-    }),
+    id: 'rich',
+    label: 'Rich',
+    description: 'Deep, jewel-toned dark surfaces with high contrast',
+    swatch: null,
+    build: (current) => {
+      const primary = current['--color-primary'] || '#5b6ee1';
+      const hsl = hexToHsl(primary);
+      if (!hsl) return current;
+      const { h, s, l } = hsl;
+      // Boost saturation for the dark bg; ensure primary is readable against it
+      const rs = Math.min(s * 1.1, 90);
+      const adjustedPrimary = hslToHex({ h, s: rs, l: Math.max(l, 52) });
+      return {
+        ...current,
+        '--color-bg':               hslToHex({ h, s: Math.max(rs * 0.4, 15), l: 7  }),
+        '--color-surface':          hslToHex({ h, s: Math.max(rs * 0.45, 18), l: 13 }),
+        '--color-text':             hslToHex({ h, s: Math.max(s * 0.08, 3),   l: 94 }),
+        '--color-text-muted':       hslToHex({ h, s: Math.max(s * 0.2, 8),    l: 60 }),
+        '--color-border':           hslToHex({ h, s: Math.max(rs * 0.45, 18), l: 22 }),
+        '--color-primary':          adjustedPrimary,
+        '--color-primary-contrast': hslToHex({ h, s: Math.max(s * 0.08, 3),   l: 96 }),
+        '--color-accent':           hslToHex({ h, s: Math.min(rs * 1.1, 92),   l: 65 }),
+      };
+    },
   },
   {
-    id: 'light',
-    label: 'Light',
-    description: 'Bright neutrals, brand color preserved',
-    swatch: ['#ffffff', null], // null = use current --color-primary
-    build: (current) => ({
-      ...current,
-      '--color-bg': '#ffffff',
-      '--color-surface': '#f6f7f9',
-      '--color-text': '#1a1d24',
-      '--color-text-muted': '#5a6175',
-      '--color-border': '#e5e7eb',
-    }),
+    id: 'vivid',
+    label: 'Vivid',
+    description: 'Crisp white base with a bold, saturated brand color',
+    swatch: null,
+    build: (current) => {
+      const primary = current['--color-primary'] || '#5b6ee1';
+      const hsl = hexToHsl(primary);
+      if (!hsl) return current;
+      const { h, s, l } = hsl;
+      // Push saturation high and pin lightness so primary pops on white
+      const vs = Math.min(s * 1.2, 95);
+      const adjustedPrimary = hslToHex({ h, s: vs, l: Math.min(Math.max(l, 38), 55) });
+      return {
+        ...current,
+        '--color-bg':               '#ffffff',
+        '--color-surface':          hslToHex({ h, s: Math.max(s * 0.12, 5),  l: 96 }),
+        '--color-text':             hslToHex({ h, s: Math.max(s * 0.2, 8),   l: 8  }),
+        '--color-text-muted':       hslToHex({ h, s: Math.max(s * 0.3, 10),  l: 38 }),
+        '--color-border':           hslToHex({ h, s: Math.max(s * 0.15, 6),  l: 88 }),
+        '--color-primary':          adjustedPrimary,
+        '--color-primary-contrast': '#ffffff',
+        '--color-accent':           hslToHex({ h, s: Math.min(vs * 1.05, 95), l: 30 }),
+      };
+    },
   },
   {
     id: 'monochrome',
     label: 'Mono',
     description: 'Shades of the brand color',
-    swatch: null, // derived at render time
+    swatch: null,
     build: (current) => {
       const primary = current['--color-primary'] || '#5b6ee1';
       const hsl = hexToHsl(primary);
       if (!hsl) return current;
       const { h, s } = hsl;
-      // Build a tonal scale from the brand hue.
       return {
         ...current,
-        '--color-bg':            hslToHex({ h, s: Math.max(s * 0.15, 6), l: 96 }),
-        '--color-surface':       hslToHex({ h, s: Math.max(s * 0.2, 8),  l: 92 }),
-        '--color-text':          hslToHex({ h, s: Math.max(s * 0.4, 15), l: 18 }),
-        '--color-text-muted':    hslToHex({ h, s: Math.max(s * 0.3, 10), l: 40 }),
-        '--color-border':        hslToHex({ h, s: Math.max(s * 0.2, 8),  l: 82 }),
-        '--color-primary':       primary,
+        '--color-bg':               hslToHex({ h, s: Math.max(s * 0.15, 6), l: 96 }),
+        '--color-surface':          hslToHex({ h, s: Math.max(s * 0.2, 8),  l: 92 }),
+        '--color-text':             hslToHex({ h, s: Math.max(s * 0.4, 15), l: 18 }),
+        '--color-text-muted':       hslToHex({ h, s: Math.max(s * 0.3, 10), l: 40 }),
+        '--color-border':           hslToHex({ h, s: Math.max(s * 0.2, 8),  l: 82 }),
+        '--color-primary':          primary,
         '--color-primary-contrast': hslToHex({ h, s: Math.max(s * 0.15, 6), l: 96 }),
-        '--color-accent':        hslToHex({ h, s: s,                     l: 35 }),
+        '--color-accent':           hslToHex({ h, s, l: 35 }),
       };
     },
   },

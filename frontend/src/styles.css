@@ -75,7 +75,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   height: 44px;
-  padding: 6px 8px 0;
+  padding: 0 8px;
   overflow-x: auto;
   user-select: none;
 }
@@ -84,14 +84,16 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   align-items: center;
   gap: 8px;
   padding: 0 14px;
-  border-right: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: transparent;
   color: var(--text-dim);
   font-size: 13px;
   cursor: pointer;
   min-width: 140px;
   max-width: 240px;
   position: relative;
+}
+.tab:not(.active):hover {
+  background: var(--bg-elev);
 }
 .tab.active {
   background: var(--bg-elev-2);

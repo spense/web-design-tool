@@ -134,12 +134,11 @@ function ColorOption({ theme, tokens, snapshot, active, onClick }) {
   } else if (theme.swatch) {
     left = theme.swatch[0];
     right = theme.swatch[1] || tokens['--color-primary'] || '#000';
-  } else if (theme.id === 'monochrome') {
-    const built = theme.build(tokens, snapshot);
-    left = built['--color-bg'];
-    right = built['--color-primary'];
   } else {
-    left = '#fff'; right = '#000';
+    const base = snapshot || tokens;
+    const built = theme.build(base, snapshot);
+    left = built['--color-bg'] || '#fff';
+    right = built['--color-primary'] || '#000';
   }
   return (
     <button
