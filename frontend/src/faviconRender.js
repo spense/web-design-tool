@@ -99,9 +99,15 @@ export function buildMonogramSvg({ letters, bg, fg, font }) {
     ? (isSerif ? 78 : 82)
     : (isMono ? 56 : isSerif ? 60 : 66);
   const letterSpacing = lt.length === 1 ? 0 : (isMono ? -4 : -3);
+  // Vertical centering: compute the baseline offset as an absolute number
+  // in viewBox units. Using `dy=".35em"` is the textbook trick but `em`
+  // resolves against the element's computed font-size, which not all SVG
+  // renderers honor when the file is consumed as a static asset (favicon,
+  // file preview). The baked-in offset has no unit ambiguity.
+  const baselineY = 50 + fontSize * 0.35;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <rect width="100" height="100" rx="22" ry="22" fill="${bg}"/>
-  <text x="50" y="50" text-anchor="middle" dominant-baseline="central"
+  <text x="50" y="${baselineY}" text-anchor="middle"
         font-family='${fontStyle.family}' font-size="${fontSize}" font-weight="${fontStyle.weight}"
         fill="${fg}" letter-spacing="${letterSpacing}">${escapeXml(lt)}</text>
 </svg>`;

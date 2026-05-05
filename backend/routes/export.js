@@ -6,6 +6,7 @@ import { getProject, projectDir } from '../storage.js';
 import { getAnthropic, resolveModel, EXPORT_SYSTEM_PROMPT } from '../anthropic.js';
 import { parseFileBlocks } from '../parseFiles.js';
 import { extractAndDedupCss } from '../cssExtractor.js';
+import { buildMonogramSvg, isImportedPlaceholder } from '../faviconSvg.js';
 
 const router = Router();
 
@@ -95,8 +96,13 @@ router.post('/:slug', async (req, res, next) => {
 
     if (faviconFiles.length > 0) {
       await fs.mkdir(exportAssetsDir, { recursive: true });
-      for (const { src, exportName } of faviconFiles) {
-        await fs.copyFile(src, path.join(exportAssetsDir, exportName));
+      for (const f of faviconFiles) {
+        const dst = path.join(exportAssetsDir, f.exportName);
+        if (f.content != null) {
+          await fs.writeFile(dst, f.content, 'utf8');
+        } else {
+          await fs.copyFile(f.src, dst);
+        }
       }
     }
 
@@ -108,9 +114,9 @@ router.post('/:slug', async (req, res, next) => {
       const buf = await fs.readFile(path.join(uploadsDir, upload));
       zip.file(`assets/${upload}`, buf);
     }
-    for (const { src, exportName } of faviconFiles) {
-      const buf = await fs.readFile(src);
-      zip.file(`assets/${exportName}`, buf);
+    for (const f of faviconFiles) {
+      const buf = f.content != null ? Buffer.from(f.content, 'utf8') : await fs.readFile(f.src);
+      zip.file(`assets/${f.exportName}`, buf);
     }
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
     const zipPath = path.join(exportDir, `${slug}-${timestamp}.zip`);
@@ -149,13 +155,23 @@ async function collectFaviconExportFiles(slug, favicon) {
     } catch { /* missing, skip */ }
   }
   // The SVG only exists for generated favicons; ship it alongside as a
-  // higher-resolution option for supporting browsers.
+  // higher-resolution option for supporting browsers. Render it fresh from
+  // the persisted params so older projects (whose on-disk SVG predates
+  // the centering fix) don't ship a stale version. Fall back to disk only
+  // when params are unavailable (e.g. zip-imported projects).
   if (variant === 'generated') {
-    const svg = path.join(dir, 'generated.svg');
-    try {
-      await fs.access(svg);
-      out.push({ src: svg, exportName: 'favicon.svg' });
-    } catch {}
+    if (!isImportedPlaceholder(favicon.generated)) {
+      out.push({
+        exportName: 'favicon.svg',
+        content: buildMonogramSvg(favicon.generated),
+      });
+    } else {
+      const svg = path.join(dir, 'generated.svg');
+      try {
+        await fs.access(svg);
+        out.push({ src: svg, exportName: 'favicon.svg' });
+      } catch {}
+    }
   }
   return out;
 }
