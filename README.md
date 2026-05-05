@@ -181,10 +181,38 @@ PATCH mode is independently safer: SEARCH/REPLACE never wholesale overwrites a f
 
 The design-tokens contract makes themes a client-side rewrite, not an LLM call.
 
-- `frontend/src/tokenRewriter.js` — `extractTokens(html)` reads `:root { --foo: bar }`; `applyTokens(html, vars)` rewrites them in place; `applyToAllPages(pages, vars)` does it across the whole project.
+- `frontend/src/tokenRewriter.js` — `extractTokens(html)` reads `:root { --foo: bar }`; `applyTokens(html, vars)` rewrites them in place; `applyToAllPages(pages, vars)` does it across the whole project. Also exports `extractGoogleFontsQuery(html)` to capture the original Google Fonts link URL for snapshot storage.
 - `frontend/src/themePresets.js` — preset definitions for color palettes, font pairings, sizing scales, spacing scales, radius scales.
 - `frontend/src/colorUtils.js` — hex/HSL utilities used to derive accent/contrast colors from a primary.
 - `components/ToolsMenu.jsx` — UI for picking a preset; on apply, rewrites `:root` across all pages and persists. **Never calls the model.**
+
+### Scroll-preserving live DOM injection
+
+Tools changes do **not** reload the iframe. Instead, `PreviewPanel.handleApplyTokens` sets CSS custom properties directly on `iframe.contentDocument.documentElement.style` and syncs Google Fonts `<link>` tags in the live `<head>`. A `displayHtml` state (separate from the underlying `html`) controls `srcDoc` — it only updates for non-tools changes (chat responses, page switches), so tools changes never trigger an iframe navigation. The source HTML (`pages`) is still updated and persisted on every tools change for export and refresh correctness.
+
+### Color themes
+
+All color themes are **derived from the design's brand color** at runtime (no hardcoded palettes):
+
+| ID | Label | Character |
+|----|-------|-----------|
+| `default` | Original | Restores the snapshot's original colors |
+| `rich` | Rich | Deep, jewel-toned dark surfaces (bg ~7% lightness) with high contrast; primary auto-lightened for readability on dark |
+| `vivid` | Vivid | Crisp white base, primary saturation boosted ~1.2×, near-black text — punchy and clean |
+| `monochrome` | Mono | Light tonal scale built from the brand hue; low-saturation surfaces, brand color preserved |
+
+Each theme's `build(currentTokens, snapshot)` function takes the current `--color-primary`, converts to HSL, and derives a full palette.
+
+### Font pairings
+
+Eight non-original pairings, each using distinct Google Fonts with no shared typefaces. Labels include font names in parentheses (e.g. "Bold (Bebas Neue, Roboto)"). The "Original" label dynamically shows the design's snapshot fonts.
+
+When "Original" is selected, the stored `__googleFonts` query is used to restore the correct Google Fonts `<link>` tag. A fallback derives the query from the snapshot's `--font-heading` / `--font-body` font names for older projects that lack `__googleFonts`.
+
+### Sizing & spacing
+
+- **Font sizing** uses snapshot-relative multipliers (Small: 0.85×, Default: restore snapshot, Large: 1.25×) via `buildSizingTokens()` — no hardcoded px values. This ensures "Default" always returns to the design's original sizes regardless of what they were.
+- **Spacing** also uses snapshot-relative multipliers (Compact: 0.6×, Comfortable: 1.0×, Roomy: 1.5×) via `buildSpacingTokens()`.
 
 This is why the system prompt is so strict about "no hardcoded brand colors / fonts / major spacing outside `:root`" — anything hardcoded is locked and the Tools menu can't swap it.
 
