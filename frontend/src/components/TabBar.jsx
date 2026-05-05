@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { api } from '../api.js';
 
 export default function TabBar({ tabs, activeId, onSelect, onClose, onAdd, onRename }) {
   return (
@@ -38,8 +39,18 @@ function Tab({ tab, active, onSelect, onClose, onRename }) {
     else setDraft(tab.name);
   };
 
+  const faviconSrc = tab.slug ? api.faviconCrispUrl(tab.slug, tab.favicon) : null;
+
   return (
     <div className={`tab ${active ? 'active' : ''}`} onClick={() => !editing && onSelect()}>
+      {faviconSrc && (
+        <img
+          className="tab-favicon"
+          src={faviconSrc}
+          alt=""
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
+      )}
       <div className="name" onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}>
         {editing ? (
           <input

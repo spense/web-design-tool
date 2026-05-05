@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 import JSZip from 'jszip';
-import { createProject, saveProject, getProject, projectDir } from '../storage.js';
+import { createProject, saveProject, getProject, projectDir, saveProjectFavicon } from '../storage.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -13,8 +13,21 @@ router.post('/', upload.single('zip'), async (req, res, next) => {
     if (!req.file) return res.status(400).json({ error: 'zip file required' });
     const zip = await JSZip.loadAsync(req.file.buffer);
 
+    // Standard favicon export filenames we recognize when reading a zip.
+    // Any of these found in assets/ get peeled out into the favicon/ folder
+    // and reconstructed into project.favicon metadata below.
+    const FAVICON_EXPORT_NAMES = {
+      'favicon-16.png': 16,
+      'favicon-32.png': 32,
+      'apple-touch-icon.png': 180,
+      'icon-192.png': 192,
+      'icon-512.png': 512,
+    };
+
     const pages = {};
     const assets = []; // [{ name, buf }]
+    const faviconAssets = {}; // size -> buf
+    let faviconSvg = null;
     const cssFiles = {}; // relativePath -> string  (e.g. 'tokens.css', 'styles.css', 'pages/contact.css')
     let brief = null, tokens = null, sessionMd = null;
 
@@ -28,7 +41,16 @@ router.post('/', upload.single('zip'), async (req, res, next) => {
       // the new project's uploads/ on disk. (Exports use assets/; older or
       // hand-built zips may use uploads/.)
       if (folder === 'assets' || folder === 'uploads') {
-        assets.push({ name: baseName, buf: await file.async('nodebuffer') });
+        const buf = await file.async('nodebuffer');
+        if (FAVICON_EXPORT_NAMES[baseName] !== undefined) {
+          faviconAssets[FAVICON_EXPORT_NAMES[baseName]] = buf;
+          continue;
+        }
+        if (baseName === 'favicon.svg') {
+          faviconSvg = buf;
+          continue;
+        }
+        assets.push({ name: baseName, buf });
         continue;
       }
 
@@ -97,6 +119,36 @@ router.post('/', upload.single('zip'), async (req, res, next) => {
       pages,
       session: { messages: importMessages },
     });
+
+    // Reconstruct the favicon if the zip carried one. Generated vs uploaded
+    // is decided by the presence of favicon.svg (only generated has it).
+    if (Object.keys(faviconAssets).length > 0) {
+      const faviconDir = path.join(projectDir(project.slug), 'favicon');
+      await fs.mkdir(faviconDir, { recursive: true });
+      const variant = faviconSvg ? 'generated' : 'uploaded';
+      for (const [size, buf] of Object.entries(faviconAssets)) {
+        await fs.writeFile(path.join(faviconDir, `${variant}-${size}.png`), buf);
+      }
+      const favicon = { selected: variant, version: 1 };
+      if (variant === 'generated') {
+        await fs.writeFile(path.join(faviconDir, 'generated.svg'), faviconSvg);
+        // We don't have the original generation params in the zip — the
+        // user can regenerate to replace these placeholders.
+        favicon.generated = { letters: '?', bg: '#000', fg: '#fff', shape: 'rounded', attempt: 0 };
+      } else {
+        // No original upload preserved in exports — use the largest PNG as
+        // the recovered "original" so the upload variant has a source file.
+        const largestSize = Math.max(...Object.keys(faviconAssets).map(Number));
+        await fs.writeFile(path.join(faviconDir, 'uploaded.png'), faviconAssets[largestSize]);
+        favicon.uploaded = {
+          filename: 'uploaded.png',
+          mediaType: 'image/png',
+          sizeBytes: faviconAssets[largestSize].length,
+          uploadedAt: new Date().toISOString(),
+        };
+      }
+      await saveProjectFavicon(project.slug, favicon);
+    }
 
     const full = await getProject(project.slug);
     res.json(full);

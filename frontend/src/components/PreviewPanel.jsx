@@ -9,7 +9,7 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug, project, onFaviconChange }) {
   const [viewport, setViewport] = useState('desktop');
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -164,6 +164,9 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 onSnapshot={onSnapshot}
                 onApply={handleApplyTokens}
                 onClose={() => setToolsOpen(false)}
+                slug={slug}
+                project={project}
+                onFaviconChange={onFaviconChange}
               />
             )}
           </div>

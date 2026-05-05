@@ -89,6 +89,14 @@ export async function saveProject(slug, { project, pages, session }) {
   const now = new Date().toISOString();
   if (project) {
     project.modified = now;
+    // The favicon is owned by the favicon endpoints — never let a client PUT
+    // clobber it. Only the favicon route writes (or unsets) this field.
+    const existing = await readJson(path.join(dir, 'project.json'), null);
+    if (existing && Object.prototype.hasOwnProperty.call(existing, 'favicon')) {
+      project.favicon = existing.favicon;
+    } else if (!Object.prototype.hasOwnProperty.call(project, 'favicon')) {
+      // Leave undefined; readers tolerate either form.
+    }
     await writeJson(path.join(dir, 'project.json'), project);
   }
   if (pages) await writeJson(path.join(dir, 'pages.json'), pages);
@@ -150,6 +158,20 @@ export async function renameProject(slug, newName) {
   };
   await writeJson(path.join(projectDir(newSlug), 'project.json'), updated);
   return updated;
+}
+
+// Targeted update of just project.favicon. Bypasses saveProject's merge so
+// the favicon endpoints can actually write this field. Other concurrent
+// PUTs to project.json from the client cannot clobber what we write here.
+export async function saveProjectFavicon(slug, favicon) {
+  const p = path.join(projectDir(slug), 'project.json');
+  const existing = await readJson(p, null);
+  if (!existing) return null;
+  if (favicon == null) delete existing.favicon;
+  else existing.favicon = favicon;
+  existing.modified = new Date().toISOString();
+  await writeJson(p, existing);
+  return existing;
 }
 
 export async function deleteProject(slug) {

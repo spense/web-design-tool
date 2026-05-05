@@ -49,6 +49,51 @@ export const api = {
     return res.json();
   },
   uploadUrl: (slug, filename) => `${API}/projects/${slug}/uploads/${encodeURIComponent(filename)}`,
+
+  faviconFileUrl: (slug, name, version) => {
+    const v = version != null ? `?v=${version}` : '';
+    return `${API}/projects/${slug}/favicon/file/${encodeURIComponent(name)}${v}`;
+  },
+  // High-res URL for in-app previews (tabs, project list, section cards).
+  // Generated favicons use SVG (sharp at any size); uploaded ones use the
+  // 192px PNG so retina displays still get crisp downscaling.
+  faviconCrispUrl: (slug, favicon) => {
+    if (!favicon?.selected) return null;
+    const v = favicon.version != null ? `?v=${favicon.version}` : '';
+    if (favicon.selected === 'generated') {
+      return `${API}/projects/${slug}/favicon/file/generated.svg${v}`;
+    }
+    return `${API}/projects/${slug}/favicon/file/uploaded-192.png${v}`;
+  },
+  saveGeneratedFavicon: async (slug, { svg, pngs, params }) => {
+    const fd = new FormData();
+    fd.append('svg', new Blob([svg], { type: 'image/svg+xml' }), 'generated.svg');
+    for (const [size, blob] of Object.entries(pngs)) {
+      fd.append(`png_${size}`, blob, `generated-${size}.png`);
+    }
+    fd.append('params', JSON.stringify(params));
+    const res = await fetch(`${API}/projects/${slug}/favicon/generated`, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    return res.json();
+  },
+  saveUploadedFavicon: async (slug, { original, pngs }) => {
+    const fd = new FormData();
+    fd.append('original', original, original.name || 'upload');
+    for (const [size, blob] of Object.entries(pngs)) {
+      fd.append(`png_${size}`, blob, `uploaded-${size}.png`);
+    }
+    const res = await fetch(`${API}/projects/${slug}/favicon/uploaded`, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    return res.json();
+  },
+  selectFavicon: (slug, selected) => jsonReq('PATCH', `/projects/${slug}/favicon/select`, { selected }),
+  deleteUploadedFavicon: (slug) => jsonReq('DELETE', `/projects/${slug}/favicon/uploaded`),
 };
 
 // Streaming chat: calls onDelta(chunk) and resolves with full text on done.

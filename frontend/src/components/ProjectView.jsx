@@ -1,8 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '../api.js';
 import ChatPanel from './ChatPanel.jsx';
 import PreviewPanel from './PreviewPanel.jsx';
 import ExportModal from './ExportModal.jsx';
+import { extractTokens } from '../tokenRewriter.js';
+import {
+  buildMonogramSvg, chooseParams, renderAllFromSvg,
+} from '../faviconRender.js';
 
 export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingChange }) {
   const [data, setData] = useState(null); // { project, pages, session }
@@ -10,6 +14,7 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
   const [activePage, setActivePage] = useState('index.html');
   const [exportResult, setExportResult] = useState(null);
   const [exporting, setExporting] = useState(false);
+  const autoFaviconRef = useRef(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +60,44 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     persist({ ...data, pages: newPages });
   }, [data, persist]);
 
+  const handleFaviconChange = useCallback((favicon) => {
+    if (!data) return;
+    // Backend already persisted this; just sync local state so the UI
+    // (preview / tabs / cards) reflects the new version + selection.
+    setData(d => d ? { ...d, project: { ...d.project, favicon } } : d);
+    onUpdateTab?.({ favicon });
+  }, [data, onUpdateTab]);
+
+  // Auto-generate a monogram favicon the first time this project has pages.
+  // Skipped on every subsequent design revision — the user regenerates manually.
+  useEffect(() => {
+    if (!data) return;
+    const slug = tab.slug;
+    if (!slug || autoFaviconRef.current.has(slug)) return;
+    const fav = data.project.favicon || {};
+    if (fav.generated || fav.uploaded) return;
+    const pageNames = Object.keys(data.pages || {});
+    if (pageNames.length === 0) return;
+
+    autoFaviconRef.current.add(slug);
+    (async () => {
+      try {
+        const html = data.pages[activePage] || data.pages[pageNames[0]];
+        const tokens = extractTokens(html) || {};
+        const params = chooseParams({ name: data.project.name, tokens, attempt: 0 });
+        const svg = buildMonogramSvg(params);
+        const pngs = await renderAllFromSvg(svg);
+        const result = await api.saveGeneratedFavicon(slug, {
+          svg, pngs, params: { ...params, attempt: 0 },
+        });
+        handleFaviconChange(result.favicon);
+      } catch (e) {
+        console.error('auto-favicon failed', e);
+        autoFaviconRef.current.delete(slug);
+      }
+    })();
+  }, [data, tab.slug, activePage, handleFaviconChange]);
+
   const handleExport = useCallback(async () => {
     setExporting(true);
     try {
@@ -91,6 +134,8 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
         snapshot={data.project.tokenSnapshot || null}
         onSnapshot={handleSnapshot}
         onApplyTokens={handleApplyTokens}
+        project={data.project}
+        onFaviconChange={handleFaviconChange}
       />
       {exportResult && (
         <ExportModal

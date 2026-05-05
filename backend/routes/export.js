@@ -57,6 +57,18 @@ router.post('/:slug', async (req, res, next) => {
     const cssFiles = Object.fromEntries(
       Object.entries(extractedCss).map(([n, c]) => [n, rewriteUploads(c)])
     );
+
+    // Favicon: figure out which files we'll ship. Inject <link> tags into
+    // each HTML page's <head> BEFORE we collect allFiles so the writes pick
+    // up the mutated HTML.
+    const faviconFiles = await collectFaviconExportFiles(slug, project.favicon);
+    if (faviconFiles.length > 0) {
+      const linkBlock = buildFaviconLinkBlock(project.favicon);
+      for (const [name, html] of Object.entries(htmlFiles)) {
+        htmlFiles[name] = injectFaviconLinks(html, linkBlock);
+      }
+    }
+
     const allFiles = { ...htmlFiles, ...cssFiles, ...docFiles };
 
     for (const [name, content] of Object.entries(allFiles)) {
@@ -81,6 +93,13 @@ router.post('/:slug', async (req, res, next) => {
       }
     } catch (e) { /* no uploads folder, fine */ }
 
+    if (faviconFiles.length > 0) {
+      await fs.mkdir(exportAssetsDir, { recursive: true });
+      for (const { src, exportName } of faviconFiles) {
+        await fs.copyFile(src, path.join(exportAssetsDir, exportName));
+      }
+    }
+
     const zip = new JSZip();
     for (const [name, content] of Object.entries(allFiles)) {
       zip.file(name, content);
@@ -88,6 +107,10 @@ router.post('/:slug', async (req, res, next) => {
     for (const upload of uploadFiles) {
       const buf = await fs.readFile(path.join(uploadsDir, upload));
       zip.file(`assets/${upload}`, buf);
+    }
+    for (const { src, exportName } of faviconFiles) {
+      const buf = await fs.readFile(src);
+      zip.file(`assets/${exportName}`, buf);
     }
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
     const zipPath = path.join(exportDir, `${slug}-${timestamp}.zip`);
@@ -102,6 +125,64 @@ router.post('/:slug', async (req, res, next) => {
     });
   } catch (e) { next(e); }
 });
+
+// Standard names used in exports (assets/...). Independent from the
+// internal generated-{size}.png / uploaded-{size}.png storage layout.
+const FAVICON_EXPORT_NAMES = {
+  16: 'favicon-16.png',
+  32: 'favicon-32.png',
+  180: 'apple-touch-icon.png',
+  192: 'icon-192.png',
+  512: 'icon-512.png',
+};
+
+async function collectFaviconExportFiles(slug, favicon) {
+  if (!favicon?.selected) return [];
+  const dir = path.join(projectDir(slug), 'favicon');
+  const variant = favicon.selected; // 'generated' | 'uploaded'
+  const out = [];
+  for (const [size, exportName] of Object.entries(FAVICON_EXPORT_NAMES)) {
+    const src = path.join(dir, `${variant}-${size}.png`);
+    try {
+      await fs.access(src);
+      out.push({ src, exportName });
+    } catch { /* missing, skip */ }
+  }
+  // The SVG only exists for generated favicons; ship it alongside as a
+  // higher-resolution option for supporting browsers.
+  if (variant === 'generated') {
+    const svg = path.join(dir, 'generated.svg');
+    try {
+      await fs.access(svg);
+      out.push({ src: svg, exportName: 'favicon.svg' });
+    } catch {}
+  }
+  return out;
+}
+
+function buildFaviconLinkBlock(favicon) {
+  const lines = [];
+  if (favicon?.selected === 'generated') {
+    lines.push('  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">');
+  }
+  lines.push('  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">');
+  lines.push('  <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">');
+  lines.push('  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">');
+  return lines.join('\n') + '\n';
+}
+
+function injectFaviconLinks(html, linkBlock) {
+  // Drop any existing favicon links so we don't double up after re-export.
+  const stripped = html.replace(
+    /[ \t]*<link\b[^>]*rel=["'](?:icon|shortcut icon|apple-touch-icon)["'][^>]*>\s*/gi,
+    ''
+  );
+  if (/<\/head>/i.test(stripped)) {
+    return stripped.replace(/<\/head>/i, `${linkBlock}</head>`);
+  }
+  // No <head> tag — nothing useful we can do. Return as-is.
+  return stripped;
+}
 
 router.get('/:slug/download/:timestamp', async (req, res, next) => {
   try {

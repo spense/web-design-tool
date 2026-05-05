@@ -35,7 +35,9 @@ export default function App() {
           const projectMap = new Map(projects.map(p => [p.slug, p]));
           const valid = state.openTabs
             .filter(t => !t.slug || projectMap.has(t.slug))
-            .map(t => t.slug ? { ...t, name: projectMap.get(t.slug).name } : t);
+            .map(t => t.slug
+              ? { ...t, name: projectMap.get(t.slug).name, favicon: projectMap.get(t.slug).favicon || null }
+              : t);
           if (valid.length) {
             setTabs(valid);
             setActiveId(valid.find(t => t.id === state.activeTab)?.id || valid[0].id);
@@ -155,7 +157,7 @@ export default function App() {
           ) : (
             t.id === activeId && (
               <NewTabView
-                onProjectOpened={(project) => updateTab(t.id, { slug: project.slug, name: project.name })}
+                onProjectOpened={(project) => updateTab(t.id, { slug: project.slug, name: project.name, favicon: project.favicon || null })}
               />
             )
           )}

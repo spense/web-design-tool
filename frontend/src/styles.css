@@ -625,6 +625,161 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   line-height: 1.5;
 }
 
+/* Favicon section */
+.favicon-empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.favicon-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.favicon-preview-frame {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+}
+.favicon-preview-frame img {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+.favicon-preview-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+.favicon-cards {
+  display: flex;
+  gap: 8px;
+}
+.favicon-card {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  overflow: hidden;
+  padding: 0;
+}
+.favicon-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.favicon-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.favicon-card-body:hover { background: var(--bg-elev-2); }
+.favicon-card-thumb {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+}
+.favicon-card-thumb img { display: block; width: 32px; height: 32px; border-radius: 7px; }
+.favicon-card-thumb-add {
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+}
+.favicon-card-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+.favicon-card.active .favicon-card-label { color: var(--text); }
+.favicon-card.add {
+  border-style: dashed;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 6px 8px;
+}
+.favicon-card.add:hover { background: var(--bg-elev-2); }
+.favicon-card-action {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.favicon-card-action:hover { color: var(--text); background: var(--border); }
+.favicon-card-action.danger:hover { color: var(--danger); border-color: var(--danger); }
+.favicon-replace {
+  align-self: flex-start;
+  font-size: 11px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.favicon-replace:hover { color: var(--text); border-color: var(--border-strong); }
+.favicon-err {
+  font-size: 11px;
+  color: var(--danger);
+}
+.favicon-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Tab + project list favicons */
+.tab-favicon {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 2px;
+  object-fit: cover;
+}
+.project-list-favicon {
+  width: 22px;
+  height: 22px;
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
 /* Spinner */
 .spinner {
   display: inline-block;

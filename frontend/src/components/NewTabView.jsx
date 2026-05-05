@@ -95,9 +95,19 @@ export default function NewTabView({ onProjectOpened }) {
           )}
           {filtered.map(p => (
             <div key={p.slug} className="project-list-item" onClick={() => handleOpen(p.slug)}>
-              <div>
-                <div style={{ fontWeight: 600 }}>{p.name}</div>
-                <div className="meta">{p.slug}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {p.favicon?.selected && (
+                  <img
+                    className="project-list-favicon"
+                    src={api.faviconCrispUrl(p.slug, p.favicon)}
+                    alt=""
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                )}
+                <div>
+                  <div style={{ fontWeight: 600 }}>{p.name}</div>
+                  <div className="meta">{p.slug}</div>
+                </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div className="meta">
