@@ -65,6 +65,9 @@ Each project lives in `projects/{slug}/`:
 ```
 project.json         metadata: name, slug, created, modified, crawledUrl,
                      crawledData, modelHistory, uploads, tokenSnapshot
+                     (tokenSnapshot also stores __googleFonts — the original
+                     Google Fonts query string, used to restore fonts on
+                     "Original" selection in the Tools menu)
 pages.json           { "index.html": "<!DOCTYPE...>", "contact.html": "...", ... }
 session.json         { messages: [{role, content, timestamp}, ...] }
 history/             snapshot per save: {ISO-timestamp}.json holds pages + last message
@@ -94,7 +97,9 @@ The `SYSTEM_PROMPT` covers:
 
 - **Output mode selection**: FULL FILE vs PATCH (see below).
 - **Design tokens contract** — required `:root` CSS variables for colors, typography, spacing, border-radius, shadows. **Every brand/theme color must reference `var(--color-…)`, not a literal.** Major spacing, body/heading font-size, border-radius, and font-family are also thematic. The contract exists so the Tools menu can swap themes by rewriting `:root` without re-running the model.
+- **Section backgrounds must use vars** — hero sections, CTA bands, footers, nav bars — no hardcoded hex/rgb for backgrounds. Dark sections on a light design must define dedicated tokens (e.g. `--color-surface-inverse`, `--color-text-inverse`) in `:root`. Without this, theme switching leaves hardcoded backgrounds unchanged while text color swaps, causing illegible combinations.
 - **Mobile responsiveness** — mobile-first CSS, breakpoints at 390/768/1024+, fluid images, 44px touch targets.
+- **Header/content alignment** — when the header uses the same `max-width` as content sections, horizontal padding must not misalign it. Either drop padding above the max-width breakpoint, or include it in the max-width calc.
 - **Visual rules** — inline CSS in `<style>` in `<head>`, no external deps except Google Fonts, `https://placehold.co/` for placeholders, real business copy (no lorem), inline single-color SVG icons (no emojis), required sections for landing pages.
 - **Multi-page rules** — every linked page must be a complete document with the same nav/header/footer markup and same `:root` tokens; page-appropriate body content.
 - **Nav styles** — Style A: in-page anchors (`#services`) for single-page; Style B: bare filenames (`about.html`) for multi-page. Never mixed.
