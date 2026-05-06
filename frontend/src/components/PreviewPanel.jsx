@@ -9,7 +9,7 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug, project, onFaviconChange }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange }) {
   const [viewport, setViewport] = useState('desktop');
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -110,6 +110,52 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     return () => iframe.removeEventListener('load', onLoad);
   }, [displayHtml, pages, onActivePage]);
 
+  // Sync animation toggle override into iframe
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !displayHtml) return;
+    const apply = () => {
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc) return;
+        const id = '__anim-override';
+        let existing = doc.getElementById(id);
+        if (!scrollAnimations) {
+          if (!existing) {
+            existing = doc.createElement('style');
+            existing.id = id;
+            existing.textContent = '.animate-in { opacity: 1 !important; transform: none !important; transition: none !important; }';
+            doc.head.appendChild(existing);
+          }
+        } else {
+          if (existing) existing.remove();
+          // Reset elements that haven't animated yet so the observer fires fresh
+          doc.querySelectorAll('.animate-in:not(.visible)').forEach(el => {
+            el.classList.remove('visible');
+          });
+          // Re-observe all animate-in elements
+          if (iframe.contentWindow) {
+            const script = doc.createElement('script');
+            script.textContent = `
+              if (window.__animObserver) window.__animObserver.disconnect();
+              window.__animObserver = new IntersectionObserver((entries) => {
+                entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); window.__animObserver.unobserve(e.target); } });
+              }, { threshold: 0.15 });
+              document.querySelectorAll('.animate-in:not(.visible)').forEach(el => window.__animObserver.observe(el));
+            `;
+            doc.body.appendChild(script);
+            script.remove();
+          }
+        }
+      } catch {}
+    };
+    // Apply immediately if iframe already loaded
+    apply();
+    // Also apply on load (for page switches)
+    iframe.addEventListener('load', apply);
+    return () => iframe.removeEventListener('load', apply);
+  }, [scrollAnimations, displayHtml]);
+
   const [copied, setCopied] = useState(false);
   const copyHtml = async () => {
     try {
@@ -167,6 +213,8 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 slug={slug}
                 project={project}
                 onFaviconChange={onFaviconChange}
+                scrollAnimations={scrollAnimations}
+                onScrollAnimationsChange={onScrollAnimationsChange}
               />
             )}
           </div>
@@ -204,7 +252,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
               height: viewport === 'desktop' ? '100%' : 'min(100%, 900px)',
               minHeight: '100%',
             }}
-            sandbox="allow-same-origin allow-forms"
+            sandbox="allow-same-origin allow-forms allow-scripts"
           />
         ) : (
           <div className="preview-empty">

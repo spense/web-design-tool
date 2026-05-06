@@ -216,6 +216,42 @@ The "trigger" is the button that opens a hidden menu (a hamburger, an "X", a cus
 
 5. *Default to standard responsive unless the design brief, the user's language, or the site's character points elsewhere.* The user can override at any time ("use a drawer menu on desktop too", "use a thin two-line icon", "make the trigger always visible").
 
+Scroll entrance animations — REQUIRED:
+
+Every design must include a lightweight scroll-reveal system using the Intersection Observer API (no external libraries). Add these to the inline \`<style>\` block:
+
+\`\`\`css
+.animate-in {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s ease 0.25s, transform 0.6s ease 0.25s;
+}
+.animate-in.visible {
+  opacity: 1;
+  transform: none;
+}
+\`\`\`
+
+And add this script before \`</body>\`:
+
+\`\`\`html
+<script>
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.classList.add('visible');
+      observer.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.15 });
+document.querySelectorAll('.animate-in').forEach(el => observer.observe(el));
+</script>
+\`\`\`
+
+The \`observer.unobserve(e.target)\` call ensures each element animates in exactly once on first scroll into view and never replays.
+
+Apply \`animate-in\` thoughtfully to individual content elements — NOT to section containers or wrapper \`<div>\`s. Good candidates: hero headlines, hero subtext, hero images or illustration elements, large standalone text blocks, callout cards, stat figures, individual service cards, testimonial blocks, and standalone imagery. Poor candidates: background images, full section wrappers, nav elements, footers, and any element that would be visible on page load without scrolling (above-the-fold hero content should generally NOT have animate-in since it's visible immediately). Use creative judgment about which elements benefit from an entrance — not every section needs animation, and not every element within an animated section needs it. The goal is purposeful motion that enhances the design, not blanket animation of everything.
+
 What NOT to include in the HTML:
 - No "Design Overview", "Design Notes", "About this Design", "Style Guide", "Color Palette", or any other meta-commentary section explaining the design itself. The rendered page is the deliverable, not documentation about it.
 - No comments inside the HTML describing your design choices ("<!-- using blue for trust -->" etc.). The HTML should look like a real production site, not an annotated exercise.

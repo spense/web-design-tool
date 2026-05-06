@@ -59,6 +59,15 @@ router.post('/:slug', async (req, res, next) => {
       Object.entries(extractedCss).map(([n, c]) => [n, rewriteUploads(c)])
     );
 
+    // If the user disabled scroll animations for this project, inject a
+    // small override stylesheet into each page so the exported HTML matches
+    // what they saw in the preview.
+    if (project.scrollAnimations === false) {
+      for (const [name, html] of Object.entries(htmlFiles)) {
+        htmlFiles[name] = injectAnimationOverride(html);
+      }
+    }
+
     // Favicon: figure out which files we'll ship. Inject <link> tags into
     // each HTML page's <head> BEFORE we collect allFiles so the writes pick
     // up the mutated HTML.
@@ -185,6 +194,14 @@ function buildFaviconLinkBlock(favicon) {
   lines.push('  <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">');
   lines.push('  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">');
   return lines.join('\n') + '\n';
+}
+
+function injectAnimationOverride(html) {
+  const style = `  <style id="anim-override">.animate-in { opacity: 1 !important; transform: none !important; transition: none !important; }</style>\n`;
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${style}</head>`);
+  }
+  return html;
 }
 
 function injectFaviconLinks(html, linkBlock) {

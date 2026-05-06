@@ -6,7 +6,12 @@ import {
 import { extractTokens, extractGoogleFontsQuery, applyToAllPages } from '../tokenRewriter.js';
 import FaviconSection from './FaviconSection.jsx';
 
-export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onApply, onClose, slug, project, onFaviconChange }) {
+const ANIMATION_OPTIONS = [
+  { id: 'on', label: 'On' },
+  { id: 'off', label: 'Off' },
+];
+
+export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onApply, onClose, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange }) {
   const ref = useRef(null);
   const html = pages?.[activePage] || (pages ? Object.values(pages)[0] : '');
   const tokens = extractTokens(html) || {};
@@ -162,6 +167,15 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
       <div className="tools-section">
         <div className="tools-label">Border radius</div>
         <Segment options={radiusScales} activeId={inferredRadius} onPick={applyRadius} />
+      </div>
+
+      <div className="tools-section">
+        <div className="tools-label">Scroll animations</div>
+        <Segment
+          options={ANIMATION_OPTIONS}
+          activeId={scrollAnimations === false ? 'off' : 'on'}
+          onPick={(o) => onScrollAnimationsChange?.(o.id === 'on')}
+        />
       </div>
 
       {slug && project && (

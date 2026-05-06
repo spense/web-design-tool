@@ -60,6 +60,11 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     persist({ ...data, pages: newPages });
   }, [data, persist]);
 
+  const handleScrollAnimationsChange = useCallback((on) => {
+    if (!data) return;
+    persist({ ...data, project: { ...data.project, scrollAnimations: on } });
+  }, [data, persist]);
+
   const handleFaviconChange = useCallback((favicon) => {
     if (!data) return;
     // Backend already persisted this; just sync local state so the UI
@@ -136,6 +141,8 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
         onApplyTokens={handleApplyTokens}
         project={data.project}
         onFaviconChange={handleFaviconChange}
+        scrollAnimations={data.project.scrollAnimations !== false}
+        onScrollAnimationsChange={handleScrollAnimationsChange}
       />
       {exportResult && (
         <ExportModal
