@@ -223,7 +223,7 @@ Every design must include a lightweight scroll-reveal system using the Intersect
 \`\`\`css
 .animate-in {
   opacity: 0;
-  transform: translateY(24px);
+  transform: translate3d(0, 24px, 0);
   transition: opacity 0.6s ease 0.25s, transform 0.6s ease 0.25s;
 }
 .animate-in.visible {
@@ -243,7 +243,7 @@ const observer = new IntersectionObserver((entries) => {
       observer.unobserve(e.target);
     }
   });
-}, { threshold: 0.15 });
+}, { threshold: 0, rootMargin: '0px 0px -10% 0px' });
 document.querySelectorAll('.animate-in').forEach(el => observer.observe(el));
 </script>
 \`\`\`

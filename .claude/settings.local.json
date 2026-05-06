@@ -38,7 +38,9 @@
       "Bash(mv /tmp/proj14.json /Users/spenserlea/Sites/web-design-tool/projects/abe-jones-v14-2026-05-04/project.json)",
       "Bash(npx --no-install vite build --logLevel error)",
       "Bash(node --check ../backend/routes/favicon.js)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(node /tmp/patch-anim.js)",
+      "Bash(rm /tmp/patch-anim.js)"
     ]
   }
 }

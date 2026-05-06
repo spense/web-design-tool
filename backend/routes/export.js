@@ -59,12 +59,23 @@ router.post('/:slug', async (req, res, next) => {
       Object.entries(extractedCss).map(([n, c]) => [n, rewriteUploads(c)])
     );
 
-    // If the user disabled scroll animations for this project, inject a
-    // small override stylesheet into each page so the exported HTML matches
-    // what they saw in the preview.
+    // The CSS extractor moved `.animate-in` rules into an external stylesheet
+    // loaded via async <link>. By the time that CSS applies, the page has
+    // already painted with elements at default opacity, causing a flash and
+    // the IntersectionObserver may have already marked above-the-fold
+    // elements visible (no animation plays). Re-inject the critical animation
+    // styles inline in <head> so they apply immediately during HTML parse.
     if (project.scrollAnimations === false) {
+      // User disabled animations — inject an override that wins over the
+      // extracted styles.
       for (const [name, html] of Object.entries(htmlFiles)) {
         htmlFiles[name] = injectAnimationOverride(html);
+      }
+    } else {
+      for (const [name, html] of Object.entries(htmlFiles)) {
+        if (/\banimate-in\b/.test(html)) {
+          htmlFiles[name] = injectCriticalAnimationCss(html);
+        }
       }
     }
 
@@ -194,6 +205,15 @@ function buildFaviconLinkBlock(favicon) {
   lines.push('  <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">');
   lines.push('  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">');
   return lines.join('\n') + '\n';
+}
+
+const CRITICAL_ANIMATION_CSS = `  <style id="anim-critical">.animate-in{opacity:0;transform:translate3d(0,24px,0);transition:opacity 0.6s ease 0.25s,transform 0.6s ease 0.25s}.animate-in.visible{opacity:1;transform:none}</style>\n`;
+
+function injectCriticalAnimationCss(html) {
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${CRITICAL_ANIMATION_CSS}</head>`);
+  }
+  return html;
 }
 
 function injectAnimationOverride(html) {
