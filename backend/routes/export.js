@@ -10,10 +10,41 @@ import { buildMonogramSvg, isImportedPlaceholder } from '../faviconSvg.js';
 
 const router = Router();
 
+// Tracks active and recently-completed export jobs by slug. Survives client
+// disconnects/refreshes so the UI can resume showing "Exporting…" state.
+// Completed entries auto-evict after CLEANUP_MS to bound memory.
+const jobs = new Map();
+const CLEANUP_MS = 5 * 60 * 1000;
+
+function scheduleCleanup(slug) {
+  setTimeout(() => {
+    const j = jobs.get(slug);
+    if (j && j.status !== 'running') jobs.delete(slug);
+  }, CLEANUP_MS);
+}
+
+router.get('/:slug/status', (req, res) => {
+  const job = jobs.get(req.params.slug);
+  res.json(job || { status: 'idle' });
+});
+
+router.delete('/:slug/status', (req, res) => {
+  jobs.delete(req.params.slug);
+  res.json({ ok: true });
+});
+
 router.post('/:slug', async (req, res, next) => {
   try {
     const { slug } = req.params;
     const { model } = req.body || {};
+
+    // If an export is already running for this slug, just return current
+    // state — the UI will pick up the running state and start polling.
+    const existing = jobs.get(slug);
+    if (existing && existing.status === 'running') {
+      return res.json(existing);
+    }
+
     const data = await getProject(slug);
     if (!data) return res.status(404).json({ error: 'Not found' });
     const { project, pages, session } = data;
@@ -22,6 +53,34 @@ router.post('/:slug', async (req, res, next) => {
       return res.status(400).json({ error: 'No design has been generated yet.' });
     }
 
+    // Start tracking the job and respond immediately. The actual work runs
+    // in the background and updates the job entry on completion.
+    const job = { status: 'running', startedAt: new Date().toISOString() };
+    jobs.set(slug, job);
+    res.json(job);
+
+    runExport(slug, project, pages, session, model).then((result) => {
+      jobs.set(slug, {
+        status: 'done',
+        result,
+        startedAt: job.startedAt,
+        completedAt: new Date().toISOString(),
+      });
+      scheduleCleanup(slug);
+    }).catch((err) => {
+      console.error('[export] failed:', err);
+      jobs.set(slug, {
+        status: 'error',
+        error: err.message || String(err),
+        startedAt: job.startedAt,
+        completedAt: new Date().toISOString(),
+      });
+      scheduleCleanup(slug);
+    });
+  } catch (e) { next(e); }
+});
+
+async function runExport(slug, project, pages, session, model) {
     const client = getAnthropic();
     const sessionSummary = (session.messages || []).map(m =>
       `[${m.role}] ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`
@@ -142,15 +201,14 @@ router.post('/:slug', async (req, res, next) => {
     const zipPath = path.join(exportDir, `${slug}-${timestamp}.zip`);
     await fs.writeFile(zipPath, zipBuffer);
 
-    res.json({
+    return {
       exportDir,
       zipPath,
       files: Object.keys(allFiles),
       timestamp,
       slug,
-    });
-  } catch (e) { next(e); }
-});
+    };
+}
 
 // Standard names used in exports (assets/...). Independent from the
 // internal generated-{size}.png / uploaded-{size}.png storage layout.

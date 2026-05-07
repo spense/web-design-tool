@@ -103,16 +103,79 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     })();
   }, [data, tab.slug, activePage, handleFaviconChange]);
 
+  // Poll export status for this slug until it leaves 'running'. Used both
+  // when starting a new export and when resuming after refresh/tab-switch.
+  const pollExportStatus = useCallback(async (slug) => {
+    const deadline = Date.now() + 10 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1500));
+      let job;
+      try {
+        job = await api.getExportStatus(slug);
+      } catch (e) {
+        // Network blip — keep trying until deadline.
+        continue;
+      }
+      // If user switched to another project mid-poll, abandon.
+      if (slug !== tab.slug) return;
+      if (job.status === 'done') {
+        setExportResult(job.result);
+        setExporting(false);
+        return;
+      }
+      if (job.status === 'error') {
+        alert('Export failed: ' + (job.error || 'Unknown error'));
+        setExporting(false);
+        try { await api.clearExportStatus(slug); } catch {}
+        return;
+      }
+      if (job.status === 'idle') {
+        // Server forgot the job (e.g. backend restart). Stop spinning.
+        setExporting(false);
+        return;
+      }
+    }
+    setExporting(false);
+    alert('Export timed out.');
+  }, [tab.slug]);
+
   const handleExport = useCallback(async () => {
     setExporting(true);
     try {
-      const result = await api.exportProject(tab.slug, 'sonnet');
-      setExportResult(result);
+      await api.exportProject(tab.slug, 'sonnet');
+      pollExportStatus(tab.slug);
     } catch (e) {
-      alert('Export failed: ' + e.message);
-    } finally {
       setExporting(false);
+      alert('Export failed: ' + e.message);
     }
+  }, [tab.slug, pollExportStatus]);
+
+  // On mount (or tab.slug change): pick up any in-progress export and resume
+  // showing the spinner; if a recent export completed while we were away,
+  // surface the result modal so the user sees it.
+  useEffect(() => {
+    let cancelled = false;
+    const slug = tab.slug;
+    (async () => {
+      try {
+        const job = await api.getExportStatus(slug);
+        if (cancelled || slug !== tab.slug) return;
+        if (job.status === 'running') {
+          setExporting(true);
+          pollExportStatus(slug);
+        } else if (job.status === 'done' && job.result) {
+          setExportResult(job.result);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [tab.slug, pollExportStatus]);
+
+  const handleCloseExportModal = useCallback(() => {
+    setExportResult(null);
+    // Clear server-side state so this completed export doesn't re-surface
+    // on a future refresh.
+    api.clearExportStatus(tab.slug).catch(() => {});
   }, [tab.slug]);
 
   if (loading) return <div className="preview-empty">Loading…</div>;
@@ -148,7 +211,7 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
         <ExportModal
           slug={tab.slug}
           result={exportResult}
-          onClose={() => setExportResult(null)}
+          onClose={handleCloseExportModal}
         />
       )}
     </div>
