@@ -192,16 +192,18 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     const newOnes = [];
     for (const file of files) {
       const isImage = file.type.startsWith('image/');
+      const isAudio = file.type.startsWith('audio/') || /\.(mp3|wav|ogg|aac|flac|webm|m4a)$/i.test(file.name);
+      const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|avi|mkv|ogv)$/i.test(file.name);
       const isText = file.type.startsWith('text/') || /\.(txt|html?|md)$/i.test(file.name);
-      if (!isImage && !isText) continue;
+      if (!isImage && !isAudio && !isVideo && !isText) continue;
       try {
-        if (isImage) {
+        if (isImage || isAudio || isVideo) {
           const meta = await api.uploadAsset(project.slug, file);
           newOnes.push({
             id: Math.random().toString(36).slice(2, 10),
             name: meta.filename,
             displayName: file.name,
-            kind: 'image-ref',
+            kind: isImage ? 'image-ref' : isAudio ? 'audio-ref' : 'video-ref',
             mediaType: meta.mediaType,
             sizeBytes: meta.sizeBytes,
           });
@@ -406,7 +408,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           <div className="chat-attachments">
             {attachments.map(a => (
               <div key={a.id} className="chat-attachment-pill" title={a.displayName || a.name}>
-                <span className="kind">{(a.kind === 'image-ref' || a.kind === 'image') ? '🖼' : '📄'}</span>
+                <span className="kind">{a.kind === 'image-ref' ? '🖼' : a.kind === 'audio-ref' ? '🔊' : a.kind === 'video-ref' ? '🎬' : '📄'}</span>
                 <span className="name">{truncateName(a.displayName || a.name)}</span>
                 <button
                   className="remove"
@@ -430,7 +432,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/*,.txt,.html,.htm,.md,text/plain,text/html"
+          accept="image/*,audio/*,video/*,.txt,.html,.htm,.md,text/plain,text/html"
           style={{ display: 'none' }}
           onChange={handleAttach}
         />
@@ -535,6 +537,24 @@ function buildUserContent(text, attachments) {
     blocks.push({
       type: 'text',
       text: `The user has attached the following image asset(s) to this project. Use them in the design with \`<img src="uploads/FILENAME">\` paths exactly as shown — do not embed base64 or use any other path. The frontend resolves these paths automatically.\n\n${list}`,
+    });
+  }
+
+  const audioRefs = attachments.filter(a => a.kind === 'audio-ref');
+  if (audioRefs.length > 0) {
+    const list = audioRefs.map(a => `- uploads/${a.name} (${a.mediaType})`).join('\n');
+    blocks.push({
+      type: 'text',
+      text: `The user has attached the following audio file(s) to this project. Use them with \`<audio src="uploads/FILENAME" controls></audio>\` paths exactly as shown. The frontend resolves these paths automatically.\n\n${list}`,
+    });
+  }
+
+  const videoRefs = attachments.filter(a => a.kind === 'video-ref');
+  if (videoRefs.length > 0) {
+    const list = videoRefs.map(a => `- uploads/${a.name} (${a.mediaType})`).join('\n');
+    blocks.push({
+      type: 'text',
+      text: `The user has attached the following video file(s) to this project. Use them with \`<video src="uploads/FILENAME" controls></video>\` paths exactly as shown. The frontend resolves these paths automatically.\n\n${list}`,
     });
   }
 
