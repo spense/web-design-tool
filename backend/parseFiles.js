@@ -35,6 +35,43 @@ function parseLabeled(text) {
   return { files, prose };
 }
 
+// Extract a `<!-- PAGES: a.html, b.html -->` declaration the model emits to
+// declare which additional pages it plans for a multi-page site. More reliable
+// than inferring from nav links, which the model sometimes writes as anchors.
+export function extractPlannedPages(text) {
+  const m = text.match(/<!--\s*PAGES:\s*([^>]+?)\s*-->/i);
+  if (!m) return [];
+  return m[1]
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => /^[a-z0-9_-]+\.html$/i.test(s));
+}
+
+// Scan generated HTML for nav links to .html files that don't exist yet.
+// Used to drive multi-page generation: the model emits index.html with links
+// to about.html/services.html/etc., and we generate each missing target in
+// follow-up turns. Returns unique filenames in the order first encountered.
+export function detectMissingPages(accumulatedText, existingPages = {}) {
+  const { files } = parseFileBlocks(accumulatedText);
+  const have = new Set([...Object.keys(files), ...Object.keys(existingPages)]);
+  const missing = [];
+  const seen = new Set();
+  // Look at nav links in every generated file (typically just index.html on
+  // first turn). Match href="name.html" — no slashes, no protocol, ends in .html.
+  const linkRe = /href\s*=\s*["']([^"'#?]+\.html)(?:[#?][^"']*)?["']/gi;
+  for (const html of Object.values(files)) {
+    let m;
+    while ((m = linkRe.exec(html)) !== null) {
+      const href = m[1].trim();
+      if (href.includes('/') || href.includes(':')) continue;
+      if (have.has(href) || seen.has(href)) continue;
+      seen.add(href);
+      missing.push(href);
+    }
+  }
+  return missing;
+}
+
 function extractRawHtmlDocs(text) {
   const docs = [];
   const re = /(?:```(?:html)?\s*\n)?(<!DOCTYPE\s+html[\s\S]*?<\/html>|<html[\s\S]*?<\/html>)\s*(?:```)?/gi;

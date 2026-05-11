@@ -34,6 +34,8 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   const jobIdRef = useRef(null);
   const streamStartRef = useRef(null);
   const applyResultRef = useRef(null);
+  const onStreamingChangeRef = useRef(onStreamingChange);
+  onStreamingChangeRef.current = onStreamingChange;
 
   // Extract result processing so both send() and the reconnect effect can call it.
   const applyResult = useCallback((result, baseMessages, baseProject, usedModel, elapsedSecs) => {
@@ -82,8 +84,14 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       for (const [name, count] of Object.entries(patchResult.applied)) {
         appliedSummary.push(`${name} (${count} edit${count === 1 ? '' : 's'})`);
       }
-      if (patchResult.failed.length > 0) {
-        const failed = patchResult.failed.map(f => `  • ${f.filename}: ${f.reason === 'not_found' ? 'file not found' : "couldn't find SEARCH block"}`).join('\n');
+      // Suppress patch-failure messages for any file that was also rewritten as
+      // a full FILE block in the same response — that's the backend's auto-recovery
+      // flow (orig EDIT failed → server retried with FULL FILE MODE). The full file
+      // supersedes the failed patch, so surfacing the patch error would be misleading.
+      const supersededByRewrite = new Set(Object.keys(safeFiles));
+      const realFailures = patchResult.failed.filter(f => !supersededByRewrite.has(f.filename));
+      if (realFailures.length > 0) {
+        const failed = realFailures.map(f => `  • ${f.filename}: ${f.reason === 'not_found' ? 'file not found' : "couldn't find SEARCH block"}`).join('\n');
         failureMessages.push({
           role: 'system',
           content: `Patch failed for:\n${failed}\n\nAsk me to try again, or request a full rewrite of the affected file(s).`,
@@ -232,12 +240,12 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   }, [messages, streamingText, crawling]);
 
   useEffect(() => {
-    onStreamingChange?.(streaming || crawling);
-  }, [streaming, crawling, onStreamingChange]);
+    onStreamingChangeRef.current?.(streaming || crawling);
+  }, [streaming, crawling]);
 
   useEffect(() => {
-    return () => { onStreamingChange?.(false); };
-  }, [onStreamingChange]);
+    return () => { onStreamingChangeRef.current?.(false); };
+  }, []);
 
   useEffect(() => {
     const ta = textareaRef.current;

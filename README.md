@@ -1,4 +1,4 @@
-# Web Design Tool
+# Cinder Labs
 
 Local-only AI design tool for generating and iterating on small-business website designs (lead-gen sites for local trades). Built around Claude with prompt caching, design tokens, and a two-mode generate/edit protocol.
 

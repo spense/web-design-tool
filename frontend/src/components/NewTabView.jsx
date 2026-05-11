@@ -62,7 +62,7 @@ export default function NewTabView({ onProjectOpened }) {
   return (
     <div className="new-tab-view">
       <div className="new-tab-card">
-        <h1>Web Design Tool</h1>
+        <h1>Cinder Labs</h1>
         <p>Generate and iterate on website designs with AI.</p>
 
         <div className="new-tab-actions">

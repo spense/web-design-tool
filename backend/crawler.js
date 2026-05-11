@@ -55,7 +55,7 @@ function extractPage(html, url) {
     description,
     text,
     headings: headings.slice(0, 30),
-    images: images.slice(0, 30),
+    images: images.slice(0, 100),
     navLinks: navLinks.slice(0, 40),
     colorHints: Array.from(colorHints).slice(0, 20),
   };

@@ -2,6 +2,9 @@
 // Falls back to detecting raw <!DOCTYPE html>...</html> documents when the
 // model skips the FILE: marker, so HTML never leaks into chat prose.
 export function parseFileBlocks(text) {
+  // Strip the multi-page `<!-- PAGES: ... -->` directive — it's a hint to the
+  // backend orchestrator, not user-facing prose.
+  text = text.replace(/<!--\s*PAGES:[^>]*-->\s*/i, '');
   const labeled = parseLabeled(text);
   if (Object.keys(labeled.files).length > 0) return labeled;
 
