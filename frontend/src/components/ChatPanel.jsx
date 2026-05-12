@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { streamChat, pollJobResult, api } from '../api.js';
 import { parseFileBlocks, detectUrl, generationStartIndex, isCompleteHtmlDoc } from '../parseFiles.js';
-import { parsePatchBlocks, applyPatches, editStartIndex } from '../parsePatch.js';
+import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, editStartIndex } from '../parsePatch.js';
 import Spinner from './Spinner.jsx';
 
 const MODELS = [
@@ -43,9 +43,12 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     const usage = result.usage;
     const truncated = result.stopReason === 'max_tokens';
 
-    const { edits, prose: patchProse } = parsePatchBlocks(fullText);
+    const regions = parseRegionBlocks(fullText);
+    // Strip REGION blocks before running other parsers so they don't leak into prose.
+    const textWithoutRegions = fullText.replace(/<!--\s*REGION:[\s\S]*?<!--\s*\/REGION\s*-->/gi, '');
+    const { edits, prose: patchProse } = parsePatchBlocks(textWithoutRegions);
     const editFiles = Object.keys(edits);
-    const { files, prose: fileProse } = parseFileBlocks(fullText);
+    const { files, prose: fileProse } = parseFileBlocks(textWithoutRegions);
 
     const rejectedFiles = [];
     const safeFiles = {};
@@ -61,6 +64,34 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     let updatedPages = { ...pages, ...safeFiles };
     let appliedSummary = [];
     const failureMessages = [];
+
+    if (regions.length > 0) {
+      const regionResult = applyRegions(updatedPages, regions);
+      updatedPages = regionResult.updatedPages;
+      const regionTotals = {};
+      for (const [name, count] of Object.entries(regionResult.applied)) {
+        regionTotals[name] = (regionTotals[name] || 0) + count;
+      }
+      for (const [name, count] of Object.entries(regionTotals)) {
+        appliedSummary.push(`${name} (${count} region${count === 1 ? '' : 's'})`);
+      }
+      // Suppress region-failure messages for files also rewritten as FULL FILE
+      // blocks in the same response (backend auto-recovery rewrote them).
+      const supersededByRewrite = new Set(Object.keys(safeFiles));
+      const realRegionFailures = regionResult.failed.filter(f => !supersededByRewrite.has(f.filename));
+      if (realRegionFailures.length > 0) {
+        const lines = realRegionFailures.map(f => {
+          if (f.reason === 'not_found') return `  • ${f.filename}: file not found`;
+          if (f.reason === 'truncated') return `  • ${f.filename}: <${f.target}> replacement was suspiciously short (${f.newLen} vs ${f.oldLen} chars) — likely abbreviated`;
+          return `  • ${f.filename}: no <${f.target}> element to replace`;
+        }).join('\n');
+        failureMessages.push({
+          role: 'system',
+          content: `Region replacement failed for:\n${lines}\n\nAsk me to try again, or request a full rewrite of the affected file(s).`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
 
     if (rejectedFiles.length > 0) {
       const list = rejectedFiles.map(n => `  • ${n}`).join('\n');
@@ -110,7 +141,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     const prose = editFiles.length > 0 ? patchProse : fileProse;
     let displayContent = prose;
     if (!displayContent) {
-      const didSomething = editFiles.length > 0 || fileNames.length > 0;
+      const didSomething = editFiles.length > 0 || fileNames.length > 0 || regions.length > 0;
       displayContent = didSomething
         ? (Object.keys(pages).length > 0 ? 'Design updated.' : 'Design generated.')
         : '(empty response)';
@@ -235,6 +266,19 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
 
   const removeAttachment = (id) => setAttachments(a => a.filter(x => x.id !== id));
 
+  // Insert a "Context Cleared" marker. Conversation history stays visible but
+  // the next API call only sends messages after this marker. The model still
+  // receives current pages via context.currentPages.
+  const clearContext = () => {
+    const marker = {
+      role: 'assistant',
+      kind: 'context-clear',
+      content: 'Context cleared.',
+      timestamp: new Date().toISOString(),
+    };
+    onUpdate(undefined, [...messages, marker], project);
+  };
+
   useEffect(() => {
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight });
   }, [messages, streamingText, crawling]);
@@ -306,7 +350,11 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     const sentAttachments = attachments;
     setAttachments([]);
 
-    const apiMessages = newMessages
+    // Honor any "Context Cleared" marker the user inserted — only send messages
+    // AFTER the most recent marker to the API, but keep the full history visible.
+    const lastClearIdx = newMessages.map(m => m.kind).lastIndexOf('context-clear');
+    const messagesForApi = lastClearIdx >= 0 ? newMessages.slice(lastClearIdx + 1) : newMessages;
+    const apiMessages = messagesForApi
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map((m, i, arr) => {
         const isLast = i === arr.length - 1;
@@ -459,6 +507,13 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           <button onClick={() => fileInputRef.current?.click()} disabled={streaming || !hasApiKey} title="Attach images or text files">
             Attach
           </button>
+          <button
+            onClick={clearContext}
+            disabled={streaming || messages.length === 0}
+            title="Reset conversation context (keeps history visible, sends fresh context to the model on next message)"
+          >
+            Clear Context
+          </button>
           <span className="spacer" />
           {streaming ? (
             <button className="danger" onClick={stopStream}>
@@ -511,6 +566,15 @@ function StreamingMessage({ text, model, isUpdate, startedAt }) {
 }
 
 function Message({ msg }) {
+  if (msg.kind === 'context-clear') {
+    return (
+      <div className="chat-msg context-clear">
+        <span className="line" />
+        <span className="label">{msg.content}</span>
+        <span className="line" />
+      </div>
+    );
+  }
   const cacheRead = msg.usage?.cache_read_input_tokens || 0;
   const cacheWrite = msg.usage?.cache_creation_input_tokens || 0;
   return (

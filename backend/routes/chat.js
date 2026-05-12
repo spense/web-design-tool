@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW } from '../anthropic.js';
 import { detectMissingPages, extractPlannedPages, parseFileBlocks } from '../parseFiles.js';
-import { parsePatchBlocks, applyPatches } from '../parsePatch.js';
+import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions } from '../parsePatch.js';
 
 const router = Router();
 
@@ -151,24 +151,33 @@ router.post('/', async (req, res, next) => {
       // for a FULL FILE MODE rewrite of the failing file(s). One retry max — if
       // it still fails, the frontend surfaces the original patch error.
       if (lastStopReason === 'end_turn' && clientConnected) {
+        const currentPages = context?.currentPages || {};
         const { edits } = parsePatchBlocks(job.fullText);
-        const editedFiles = Object.keys(edits);
-        if (editedFiles.length > 0) {
-          const currentPages = context?.currentPages || {};
-          const { failed } = applyPatches(currentPages, edits);
-          const failedFiles = [...new Set(failed.map(f => f.filename))];
-          if (failedFiles.length > 0) {
-            const followUpMessages = [
-              ...messages,
-              { role: 'assistant', content: assistantSoFar },
-              {
-                role: 'user',
-                content: `Your SEARCH/REPLACE block(s) for ${failedFiles.join(', ')} didn't byte-match the current file contents, so the patch couldn't be applied. Re-emit the affected file(s) in FULL FILE MODE — complete \`<!-- FILE: filename -->\` block(s) with the full \`<!DOCTYPE html>\`…\`</html>\` document, with all of your intended changes already applied. Only emit the file(s) listed; do NOT touch any others.`,
-              },
-            ];
-            const turn = await runTurn(followUpMessages);
-            assistantSoFar += turn.turnText;
-          }
+        const regions = parseRegionBlocks(job.fullText);
+        const failedFiles = new Set();
+        let pagesAfterRegions = currentPages;
+        if (regions.length > 0) {
+          const r = applyRegions(currentPages, regions);
+          r.failed.forEach(f => failedFiles.add(f.filename));
+          pagesAfterRegions = r.updatedPages;
+        }
+        if (Object.keys(edits).length > 0) {
+          const { failed } = applyPatches(pagesAfterRegions, edits);
+          failed.forEach(f => failedFiles.add(f.filename));
+        }
+        console.log(`[chat] recovery-check edits=${Object.keys(edits).length} regions=${regions.length} pages=${Object.keys(currentPages).length} failed=${[...failedFiles].join(',') || 'none'}`);
+        if (failedFiles.size > 0) {
+          const list = [...failedFiles];
+          const followUpMessages = [
+            ...messages,
+            { role: 'assistant', content: assistantSoFar },
+            {
+              role: 'user',
+              content: `Your patch block(s) for ${list.join(', ')} couldn't be applied (either the SEARCH text didn't byte-match the current file, or the REGION target element wasn't found). Re-emit the affected file(s) in FULL FILE MODE — complete \`<!-- FILE: filename -->\` block(s) with the full \`<!DOCTYPE html>\`…\`</html>\` document, with all of your intended changes already applied. Only emit the file(s) listed; do NOT touch any others.`,
+            },
+          ];
+          const turn = await runTurn(followUpMessages);
+          assistantSoFar += turn.turnText;
         }
       }
 

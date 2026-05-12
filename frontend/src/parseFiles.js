@@ -82,7 +82,7 @@ export function htmlStartIndex(text) {
 // Index where ANY generation marker (FULL FILE or PATCH) begins. Used to
 // trim the streaming preview so HTML/SEARCH-REPLACE never shows in chat.
 export function generationStartIndex(text) {
-  const match = text.match(/<!--\s*EDIT:|<!--\s*FILE:|<!DOCTYPE\s+html|<html[\s>]|```html|<{5,}\s*SEARCH/i);
+  const match = text.match(/<!--\s*EDIT:|<!--\s*FILE:|<!--\s*REGION:|<!DOCTYPE\s+html|<html[\s>]|```html|<{5,}\s*SEARCH/i);
   return match ? match.index : -1;
 }
 

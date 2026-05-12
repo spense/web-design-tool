@@ -160,10 +160,121 @@ function tryFuzzyLineMatch(haystack, search, replace) {
 // Detect whether a partial stream contains an EDIT block — used for the
 // "Applying edits…" status indicator.
 export function detectEditStart(text) {
-  return /<!--\s*EDIT:/i.test(text);
+  return /<!--\s*EDIT:|<!--\s*REGION:/i.test(text);
 }
 
 export function editStartIndex(text) {
-  const m = text.match(/<!--\s*EDIT:/i);
+  const m = text.match(/<!--\s*EDIT:|<!--\s*REGION:/i);
   return m ? m.index : -1;
+}
+
+// Parse `<!-- REGION: <target> in <files> -->\n<content>\n<!-- /REGION -->` blocks.
+// Targets: 'header' | 'footer' | 'nav' | 'root'.
+// Files: comma-separated bare filenames OR '*.html' / '*' wildcard.
+export function parseRegionBlocks(text) {
+  const re = /<!--\s*REGION:\s*(header|footer|nav|root)\s+in\s+([^>]+?)\s*-->\s*([\s\S]*?)\s*<!--\s*\/REGION\s*-->/gi;
+  const regions = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const target = m[1].toLowerCase();
+    const files = m[2].split(',').map(s => s.trim()).filter(Boolean);
+    const content = m[3];
+    regions.push({ target, files, content });
+  }
+  return regions;
+}
+
+function expandFileList(patterns, allFiles) {
+  const out = new Set();
+  for (const p of patterns) {
+    if (p === '*' || p === '*.html') {
+      for (const f of allFiles) if (f.endsWith('.html')) out.add(f);
+    } else {
+      out.add(p);
+    }
+  }
+  return [...out];
+}
+
+// Apply parsed REGION blocks to a map of pages. Returns:
+//   { updatedPages, applied: { filename: count }, failed: [{filename, target, reason}] }
+// Failure reasons: 'not_found' (file missing), 'no_region' (target element not in file).
+export function applyRegions(currentPages, regions) {
+  const updatedPages = { ...currentPages };
+  const applied = {};
+  const failed = [];
+
+  for (const { target, files, content } of regions) {
+    const targetFiles = expandFileList(files, Object.keys(updatedPages));
+    for (const filename of targetFiles) {
+      const original = updatedPages[filename];
+      if (original == null) {
+        failed.push({ filename, target, reason: 'not_found' });
+        continue;
+      }
+      const result = replaceRegion(original, target, content);
+      if (result == null) {
+        failed.push({ filename, target, reason: 'no_region' });
+        continue;
+      }
+      // Truncation guard: a region body dramatically shorter than what it
+      // replaces almost certainly means the model abbreviated (placeholder
+      // comments, dropped items). Reject so the user gets a clear failure
+      // message rather than a silently-mangled page.
+      const newLen = content.trim().length;
+      const oldLen = result.replacedLength;
+      if (oldLen > 200 && newLen < oldLen * 0.5) {
+        failed.push({ filename, target, reason: 'truncated', oldLen, newLen });
+        continue;
+      }
+      updatedPages[filename] = result.updated;
+      applied[filename] = (applied[filename] || 0) + 1;
+    }
+  }
+  return { updatedPages, applied, failed };
+}
+
+function replaceRegion(html, target, newContent) {
+  if (target === 'root') {
+    const re = /(:root\s*\{)([^}]*)(\})/;
+    const m = html.match(re);
+    if (!m) return null;
+    const updated = html.replace(re, (_, open, _body, close) => `${open}\n${newContent}\n${close}`);
+    return { updated, replacedLength: m[2].length };
+  }
+  return replaceFirstElement(html, target, newContent);
+}
+
+// Replace the first balanced occurrence of <tag>...</tag>, honoring nesting.
+// Returns { updated, replacedLength } so callers can sanity-check that the new
+// content is roughly the same scale as the original.
+function replaceFirstElement(html, tag, newContent) {
+  const openPattern = new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'gi');
+  const closePattern = new RegExp(`</${tag}\\s*>`, 'gi');
+  const firstOpen = openPattern.exec(html);
+  if (!firstOpen) return null;
+  const start = firstOpen.index;
+  let depth = 1;
+  let pos = firstOpen.index + firstOpen[0].length;
+  while (depth > 0) {
+    openPattern.lastIndex = pos;
+    closePattern.lastIndex = pos;
+    const o = openPattern.exec(html);
+    const c = closePattern.exec(html);
+    if (!c) return null;
+    if (o && o.index < c.index) {
+      depth++;
+      pos = o.index + o[0].length;
+    } else {
+      depth--;
+      pos = c.index + c[0].length;
+      if (depth === 0) {
+        return {
+          updated: html.slice(0, start) + newContent + html.slice(pos),
+          replacedLength: pos - start,
+        };
+      }
+    }
+  }
+  return null;
 }

@@ -48,7 +48,7 @@ Use when (and prefer this when in doubt — it's much faster):
 - Adding/removing items in a list (services, testimonials, links)
 - Adjusting spacing, fonts, sizes
 - Anything where most of the file stays the same
-- **Theme / restyle changes** (new color palette, "make it more modern", "minimalist", font swap, spacing rework). The whole point of the design-tokens block is that a restyle is a small edit to \`:root\` plus a handful of targeted tweaks — NOT a full rewrite. Rewrite the \`:root\` token values in PATCH MODE and apply small follow-up edits where component-internal styles need to match. Do this even when the visual change feels big.
+- **Theme / restyle changes** (new color palette, "make it more modern", "minimalist", font swap, spacing rework). The whole point of the design-tokens block is that a restyle is a small edit to \`:root\` plus a handful of targeted tweaks — NOT a full rewrite. For multi-page projects, swap the \`:root\` block using REGION MODE (see below) so every page's tokens update in one shot; for single-page projects, PATCH MODE on \`:root\` is fine. Either way, do this even when the visual change feels big.
 
 CRITICAL — do not re-emit unrelated pages. When the user asks for changes to one page (or a theme change that applies via tokens), only emit FILE/EDIT blocks for the file(s) you actually need to change. Never wholesale re-emit a sibling page (e.g. contact.html) just to "keep it in sync" — the shared \`:root\` tokens already do that, and re-emitting risks truncation that wipes out the existing page. If a multi-page restyle truly requires touching every page, use PATCH MODE on each, not FULL FILE MODE.
 
@@ -68,6 +68,40 @@ Rules for SEARCH/REPLACE:
 - Multiple files in one response are allowed — repeat the \`<!-- EDIT: filename -->\` header for each.
 - Never use PATCH mode for new files — those need FULL FILE MODE.
 - Never mix modes for the same file in one response.
+
+## REGION MODE — for global changes synced across multiple pages
+
+Use REGION MODE whenever the user wants the same whole-element change applied across multiple pages: header sync, footer sync, nav sync, or design-token (\`:root\`) swaps. The runtime locates the named element in each target file and replaces it deterministically — no SEARCH text required, so byte-exact recall is not a problem.
+
+Supported targets:
+- \`header\` — the page's outermost \`<header>\` element
+- \`footer\` — the page's outermost \`<footer>\` element
+- \`nav\` — the page's outermost \`<nav>\` element (use this only when the nav is NOT already inside a \`<header>\` you're also replacing)
+- \`root\` — the declaration body inside the \`:root { ... }\` block in \`<style>\`
+
+Format:
+
+<!-- REGION: header in *.html -->
+<header class="site-header">
+  ...full new header markup...
+</header>
+<!-- /REGION -->
+
+<!-- REGION: root in *.html -->
+--color-bg: #fff;
+--color-primary: #2c5aa0;
+/* ...all token declarations... */
+<!-- /REGION -->
+
+Rules:
+- File list: comma-separated bare filenames (\`terms.html, privacy.html\`) OR the wildcard \`*.html\` for every HTML page in the project.
+- For \`header\` / \`footer\` / \`nav\`: include the wrapping element tags themselves in the content (e.g. \`<header>...</header>\`). For \`root\`: provide ONLY the declaration body — no \`:root {\` / \`}\` wrappers.
+- REGION content MUST be the COMPLETE element with your changes applied. Never abbreviate, never use placeholder comments like \`<!-- rest unchanged -->\` or \`<!-- ...other nav items... -->\`. The runtime replaces the entire element verbatim — anything you omit is GONE. If the current header has 8 nav links and you're fixing 2 of them, your REGION must contain ALL 8 links with the 2 corrected and the other 6 preserved exactly. The token cost of emitting the full element is the whole point of REGION — embrace it.
+- Emit the new content ONCE. Do NOT emit a separate REGION block (or EDIT block) per file for the same change.
+- ALWAYS prefer REGION over EDIT/SEARCH-REPLACE for cross-page sync. Never emit parallel SEARCH/REPLACE blocks targeting the same element across multiple files — it will fail and waste a turn.
+- Use REGION even for **small changes inside a region** when the change spans multiple pages. Fixing one link's \`href\`, swapping one button's copy, or tweaking one nav item across terms.html and privacy.html — re-emit the whole \`<header>\` (or \`<footer>\` / \`<nav>\`) via REGION rather than four tiny SEARCH/REPLACE blocks. The reason: byte-exact SEARCH text for header/footer/nav contents is unreliable across turns, and REGION is deterministic. The token cost of re-emitting the region once is small compared to a failed-patch retry.
+- REGION and EDIT blocks may coexist in the same response, but never target the same element in the same file from both.
+- REGION cannot create elements that don't exist. If a target file is missing the named element (e.g. \`<footer>\` not present), use FULL FILE MODE for that file instead.
 
 # Design rules (apply to both modes)
 

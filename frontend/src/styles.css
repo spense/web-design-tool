@@ -190,6 +190,31 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .chat-msg.assistant .who { color: var(--success); }
 .chat-msg.system { color: var(--text-dim); font-style: italic; }
 .chat-msg .body { color: var(--text); }
+.chat-msg.assistant {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.chat-msg.context-clear {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0;
+}
+.chat-msg.context-clear .line {
+  flex: 1;
+  height: 1px;
+  background: var(--text-faint);
+  opacity: 0.3;
+}
+.chat-msg.context-clear .label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
 .chat-msg .body code,
 .chat-msg .body pre {
   font-family: var(--mono);
