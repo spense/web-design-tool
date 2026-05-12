@@ -317,6 +317,28 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   font-size: 12px;
 }
 .chat-input-row .spacer { flex: 1; }
+.chat-input-left {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.chat-input-row button.icon-only {
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+}
+.chat-input-row button.icon-only:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-elev-2);
+}
+.chat-input-row button.icon-only:disabled {
+  opacity: 0.4;
+}
 .chat-input-row select {
   appearance: none;
   -webkit-appearance: none;

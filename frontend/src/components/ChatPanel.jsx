@@ -493,28 +493,36 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           onChange={handleAttach}
         />
         <div className="chat-input-row">
-          <select
-            value={model}
-            onChange={(e) => {
-              const next = e.target.value;
-              setModel(next);
-              onUpdate(undefined, undefined, { ...project, lastModel: next });
-            }}
-            disabled={streaming}
-          >
-            {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
-          <button onClick={() => fileInputRef.current?.click()} disabled={streaming || !hasApiKey} title="Attach images or text files">
-            Attach
-          </button>
-          <button
-            onClick={clearContext}
-            disabled={streaming || messages.length === 0}
-            title="Reset conversation context (keeps history visible, sends fresh context to the model on next message)"
-          >
-            Clear Context
-          </button>
+          <div className="chat-input-left">
+            <select
+              value={model}
+              onChange={(e) => {
+                const next = e.target.value;
+                setModel(next);
+                onUpdate(undefined, undefined, { ...project, lastModel: next });
+              }}
+              disabled={streaming}
+            >
+              {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+            <button
+              onClick={clearContext}
+              disabled={streaming || messages.length === 0}
+              title="Reset conversation context (keeps history visible, sends fresh context to the model on next message)"
+            >
+              Clear Context
+            </button>
+          </div>
           <span className="spacer" />
+          <button
+            className="icon-only"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={streaming || !hasApiKey}
+            title="Attach images or text files"
+            aria-label="Attach files"
+          >
+            <PaperclipIcon />
+          </button>
           {streaming ? (
             <button className="danger" onClick={stopStream}>
               <StopIcon /> Stop
@@ -653,6 +661,13 @@ function StopIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+function PaperclipIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
     </svg>
   );
 }
