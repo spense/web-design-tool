@@ -6,7 +6,6 @@ export default function NewTabView({ onProjectOpened }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [query, setQuery] = useState('');
-  const fileRef = useRef(null);
   const searchRef = useRef(null);
 
   useEffect(() => { searchRef.current?.focus(); }, []);
@@ -37,17 +36,6 @@ export default function NewTabView({ onProjectOpened }) {
     if (project) onProjectOpened(project);
   };
 
-  const handleImport = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setBusy(true); setErr(null);
-    try {
-      const { project } = await api.importProject(file);
-      onProjectOpened(project);
-    } catch (err) { setErr(err.message); }
-    finally { setBusy(false); e.target.value = ''; }
-  };
-
   const handleDelete = async (e, slug) => {
     e.stopPropagation();
     if (!confirm(`Delete project "${slug}"? This cannot be undone.`)) return;
@@ -67,8 +55,6 @@ export default function NewTabView({ onProjectOpened }) {
 
         <div className="new-tab-actions">
           <button className="primary" onClick={handleNew} disabled={busy}>New Project</button>
-          <button onClick={() => fileRef.current?.click()} disabled={busy}>Import .zip</button>
-          <input ref={fileRef} type="file" accept=".zip" onChange={handleImport} style={{ display: 'none' }} />
         </div>
 
         {err && <div style={{ color: 'var(--danger)', marginBottom: 12, fontSize: 13 }}>{err}</div>}
