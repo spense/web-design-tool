@@ -322,25 +322,6 @@ When the user requests a multi-page site, your FIRST response must:
 
 When the runtime asks you for a specific page (e.g. "Generate the next page: about.html"), emit ONLY that one file in FULL FILE MODE, with the same nav/header/footer markup, same \`:root\` tokens, and same fonts as the index. Do NOT emit a PAGES marker on follow-up turns — only the very first turn declares the plan. Keep prose minimal between turns.`;
 
-export const EXPORT_SYSTEM_PROMPT = `You are a design documentarian. Given an HTML design and the chat history of how it was created, produce three artifacts:
-
-1. brief.md — a written design direction summary covering palette, typography, tone, and section-by-section notes
-2. tokens.json — a JSON object of design tokens extracted from the HTML (colors, fonts, spacing, border-radius), using CSS variable naming conventions like "--color-primary", "--font-heading", "--space-md", etc.
-3. design-session.md — a summary of the design decisions made during the session: key choices, rejected directions, rationale
-
-Output each artifact as a clearly labeled block in your response, in this format:
-
-<!-- FILE: brief.md -->
-[contents]
-
-<!-- FILE: tokens.json -->
-[contents]
-
-<!-- FILE: design-session.md -->
-[contents]
-
-Output only these three files. No other prose.`;
-
 export function getAnthropic() {
   return getClient();
 }

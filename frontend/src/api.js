@@ -23,10 +23,9 @@ export const api = {
   deleteProject: (slug) => jsonReq('DELETE', `/projects/${slug}`),
   duplicateProject: (slug) => jsonReq('POST', `/projects/${slug}/duplicate`),
   crawl: (url) => jsonReq('POST', '/crawl', { url }),
-  exportProject: (slug, model) => jsonReq('POST', `/export/${slug}`, { model }),
+  exportProject: (slug) => jsonReq('POST', `/export/${slug}`),
   getExportStatus: (slug) => jsonReq('GET', `/export/${slug}/status`),
   clearExportStatus: (slug) => jsonReq('DELETE', `/export/${slug}/status`),
-  downloadExportUrl: (slug, timestamp) => `${API}/export/${slug}/download/${timestamp}`,
   importProject: async (file) => {
     const fd = new FormData();
     fd.append('zip', file);

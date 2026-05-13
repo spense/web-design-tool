@@ -1,10 +1,7 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs/promises';
-import JSZip from 'jszip';
 import { getProject, projectDir } from '../storage.js';
-import { getAnthropic, resolveModel, EXPORT_SYSTEM_PROMPT } from '../anthropic.js';
-import { parseFileBlocks } from '../parseFiles.js';
 import { extractAndDedupCss } from '../cssExtractor.js';
 import { buildMonogramSvg, isImportedPlaceholder } from '../faviconSvg.js';
 
@@ -36,7 +33,6 @@ router.delete('/:slug/status', (req, res) => {
 router.post('/:slug', async (req, res, next) => {
   try {
     const { slug } = req.params;
-    const { model } = req.body || {};
 
     // If an export is already running for this slug, just return current
     // state — the UI will pick up the running state and start polling.
@@ -59,7 +55,7 @@ router.post('/:slug', async (req, res, next) => {
     jobs.set(slug, job);
     res.json(job);
 
-    runExport(slug, project, pages, session, model).then((result) => {
+    runExport(slug, project, pages, session).then((result) => {
       jobs.set(slug, {
         status: 'done',
         result,
@@ -80,24 +76,7 @@ router.post('/:slug', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-async function runExport(slug, project, pages, session, model) {
-    const client = getAnthropic();
-    const sessionSummary = (session.messages || []).map(m =>
-      `[${m.role}] ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`
-    ).join('\n\n');
-
-    const userMsg = `Project: ${project.name}\nCrawled URL: ${project.crawledUrl || 'none'}\n\n=== Current HTML files ===\n${Object.entries(pages).map(([n, c]) => `<!-- ${n} -->\n${c}`).join('\n\n')}\n\n=== Chat session ===\n${sessionSummary}`;
-
-    const result = await client.messages.create({
-      model: resolveModel(model || 'sonnet'),
-      max_tokens: 8000,
-      system: EXPORT_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMsg }],
-    });
-
-    const text = result.content.map(b => b.text || '').join('');
-    const { files: docFiles } = parseFileBlocks(text);
-
+async function runExport(slug, project, pages, session) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const exportDir = path.join(projectDir(slug), 'exports', `design-reference-${timestamp}`);
     await fs.mkdir(exportDir, { recursive: true });
@@ -149,7 +128,7 @@ async function runExport(slug, project, pages, session, model) {
       }
     }
 
-    const allFiles = { ...htmlFiles, ...cssFiles, ...docFiles };
+    const allFiles = { ...htmlFiles, ...cssFiles };
 
     for (const [name, content] of Object.entries(allFiles)) {
       const fullPath = path.join(exportDir, name);
@@ -185,25 +164,8 @@ async function runExport(slug, project, pages, session, model) {
       }
     }
 
-    const zip = new JSZip();
-    for (const [name, content] of Object.entries(allFiles)) {
-      zip.file(name, content);
-    }
-    for (const upload of uploadFiles) {
-      const buf = await fs.readFile(path.join(uploadsDir, upload));
-      zip.file(`assets/${upload}`, buf);
-    }
-    for (const f of faviconFiles) {
-      const buf = f.content != null ? Buffer.from(f.content, 'utf8') : await fs.readFile(f.src);
-      zip.file(`assets/${f.exportName}`, buf);
-    }
-    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
-    const zipPath = path.join(exportDir, `${slug}-${timestamp}.zip`);
-    await fs.writeFile(zipPath, zipBuffer);
-
     return {
       exportDir,
-      zipPath,
       files: Object.keys(allFiles),
       timestamp,
       slug,
@@ -294,16 +256,5 @@ function injectFaviconLinks(html, linkBlock) {
   // No <head> tag — nothing useful we can do. Return as-is.
   return stripped;
 }
-
-router.get('/:slug/download/:timestamp', async (req, res, next) => {
-  try {
-    const { slug, timestamp } = req.params;
-    const exportDir = path.join(projectDir(slug), 'exports', `design-reference-${timestamp}`);
-    const entries = await fs.readdir(exportDir);
-    const zipName = entries.find(f => f.endsWith('.zip'));
-    if (!zipName) return res.status(404).json({ error: 'Zip not found' });
-    res.download(path.join(exportDir, zipName));
-  } catch (e) { next(e); }
-});
 
 export default router;

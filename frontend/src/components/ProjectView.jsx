@@ -142,7 +142,7 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
   const handleExport = useCallback(async () => {
     setExporting(true);
     try {
-      await api.exportProject(tab.slug, 'sonnet');
+      await api.exportProject(tab.slug);
       pollExportStatus(tab.slug);
     } catch (e) {
       setExporting(false);
