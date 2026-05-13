@@ -16,6 +16,9 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   const iframeRef = useRef(null);
   const pageDropdownRef = useRef(null);
   const toolsUpdateRef = useRef(false);
+  const savedScrollRef = useRef(0);
+  const scrollAnimationsRef = useRef(scrollAnimations);
+  scrollAnimationsRef.current = scrollAnimations;
   const [displayHtml, setDisplayHtml] = useState('');
 
   const pageNames = Object.keys(pages || {});
@@ -28,6 +31,11 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
       toolsUpdateRef.current = false;
       return;
     }
+    // Save scroll position before the iframe reloads with new srcDoc
+    try {
+      const win = iframeRef.current?.contentWindow;
+      if (win) savedScrollRef.current = win.scrollY || 0;
+    } catch {}
     setDisplayHtml(html);
   }, [html]);
 
@@ -87,6 +95,11 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
       try {
         const doc = iframe.contentDocument;
         if (!doc) return;
+        // Restore scroll position saved before srcDoc swap
+        if (savedScrollRef.current) {
+          iframe.contentWindow?.scrollTo({ top: savedScrollRef.current, behavior: 'instant' });
+          savedScrollRef.current = 0;
+        }
         doc.addEventListener('mousedown', closeAllPopovers, { capture: true });
         doc.querySelectorAll('a[href]').forEach(a => {
           a.addEventListener('click', (ev) => {
@@ -98,7 +111,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
             } else if (resolved.action === 'scroll') {
               ev.preventDefault();
               const el = doc.getElementById(resolved.target);
-              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              if (el) el.scrollIntoView({ behavior: scrollAnimationsRef.current ? 'smooth' : 'instant', block: 'start' });
             } else if (resolved.action === 'block') {
               ev.preventDefault();
             }
