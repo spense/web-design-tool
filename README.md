@@ -27,7 +27,7 @@ Frontend is a single SPA. Each "tab" is a project. Generated HTML is rendered in
 ### Backend
 
 - `server.js` — Express setup, CORS, route mounting, port 3001.
-- `anthropic.js` — Claude SDK client, `MODELS` map, `SYSTEM_PROMPT`, `EXPORT_SYSTEM_PROMPT`.
+- `anthropic.js` — Claude SDK client, `MODELS` map, `SYSTEM_PROMPT`.
 - `storage.js` — filesystem CRUD for projects (read/write/list/rename/delete).
 - `crawler.js` — fetches a competitor URL with cheerio, extracts title/meta/headings/links/colors as intake data.
 - `parseFiles.js` — server-side parser for `<!-- FILE: -->` blocks (mirrored on frontend).
@@ -35,8 +35,8 @@ Frontend is a single SPA. Each "tab" is a project. Generated HTML is rendered in
   - `projects.js` — CRUD: list, get, create, rename, delete, save.
   - `chat.js` — streaming SSE endpoint (the main one).
   - `crawl.js` — POST a URL, returns structured intake data.
-  - `export.js` — generates `brief.md` + `tokens.json` + `design-session.md` via `EXPORT_SYSTEM_PROMPT`, then zips with all pages + uploads.
-  - `import.js` — accepts a zip, creates a project from it.
+  - `export.js` — extracts CSS into external stylesheets, copies assets/favicons, writes the export bundle to disk. No API call — purely local.
+  - `import.js` — accepts a zip, creates a project from it (backend kept as reference; UI removed).
   - `uploads.js` — image upload + serve (sanitized filenames, suffix collision avoidance).
   - `appState.js` — persists open tabs / active tab in `app-state.json`.
 
@@ -121,10 +121,6 @@ The system prompt is split into **two blocks** to maximize prompt caching:
 The model sees the full current state of every file under `<!-- CURRENT FILE: name -->` headers — that's what enables byte-exact PATCH SEARCH matching.
 
 The endpoint streams Anthropic SSE deltas back to the client and emits a final `done` event with `{ text, stopReason, usage }`. `max_tokens: 32000`. Every completed turn logs `[chat] model=… stop=… in=… out=… cache_write=… cache_read=…` — `stop=max_tokens` is the truncation signal.
-
-### EXPORT_SYSTEM_PROMPT (`backend/anthropic.js:220`)
-
-A separate prompt used only by `routes/export.js`. Produces three artifacts from the final HTML + chat history: `brief.md` (design direction summary), `tokens.json` (extracted CSS variable values), `design-session.md` (decisions and rejected directions).
 
 ---
 
@@ -226,9 +222,9 @@ This is why the system prompt is so strict about "no hardcoded brand colors / fo
 
 ## Export / import
 
-**Export** (`routes/export.js`): runs `EXPORT_SYSTEM_PROMPT` against the final HTML + chat history to produce `brief.md`, `tokens.json`, `design-session.md`; zips those plus all `pages.json` files and `uploads/`. Saved to `exports/{timestamp}/`. The `/api/export/{slug}/download/{timestamp}` endpoint serves the zip.
+**Export** (`routes/export.js`): extracts inline CSS into external stylesheets, rewrites upload paths to `assets/`, injects critical animation CSS and favicon `<link>` tags, then writes the bundle to `exports/{timestamp}/`. No API call — purely local file operations.
 
-**Import** (`routes/import.js`): accepts a zip via multipart form, creates a fresh project, populates `pages.json` from `.html` files in the zip and seeds session messages from the markdown artifacts.
+**Import** (`routes/import.js`): accepts a zip via multipart form, creates a fresh project, populates `pages.json` from `.html` files in the zip. Backend route is kept as a reference; the UI import button has been removed (use clone instead).
 
 ---
 
