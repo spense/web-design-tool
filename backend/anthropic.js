@@ -188,6 +188,7 @@ Visual & content:
 - Real business copy based on intake data — never lorem ipsum
 - Required sections: hero, services, about/why-us, social proof, service area, contact form (action="#"), footer
 - Contact form fields: name, phone, email, message, submit
+- Do NOT include any JavaScript form submission logic — no addEventListener('submit', ...), no fetch calls to form endpoints, no Web3Forms integration code (access keys, redirect inputs, success/error handling). Just build the HTML form with its fields, labels, and a submit button. The form action, hidden inputs, and submission behavior are wired up by a separate build pipeline after export.
 
 Page structure:
 - Default to a single-page design (all sections on index.html) unless the user specifies otherwise.
