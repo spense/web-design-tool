@@ -13,6 +13,7 @@ function getClient() {
 
 export const MODELS = {
   opus: 'claude-opus-4-7',
+  opus46: 'claude-opus-4-6',
   sonnet: 'claude-sonnet-4-6',
   haiku: 'claude-haiku-4-5',
 };
@@ -301,6 +302,20 @@ What NOT to include in the HTML:
 - No comments inside the HTML describing your design choices ("<!-- using blue for trust -->" etc.). The HTML should look like a real production site, not an annotated exercise.
 - No author/AI/tool attribution anywhere in the page (no "Designed by Claude", no "Generated with X", etc.).
 - Design rationale belongs in the chat prose accompanying the response, not embedded in the page.
+
+Preserving unchanged content — CRITICAL:
+
+When the user asks you to change a specific element, section, or subset of the page, change ONLY what was requested. Everything else — text, layout, images, SVGs, icons, colors, structure — must remain byte-identical to the current file. If the user says "try a new icon for the 3rd card," the other cards' icons, text, and markup must not change at all. Treat every element you did not explicitly create in this turn as locked unless the user asks you to change it. This applies especially to:
+- Inline SVG icons: if the user asks to change one icon, leave all other icons exactly as they are in the current file.
+- Background patterns, decorative CSS: if the user asks to remove or change one, do not touch others.
+- Section content: editing one section means every other section's markup is preserved verbatim.
+- When using FULL FILE MODE for an iteration (not a first generation), copy unchanged sections from the CURRENT FILE content provided in context character-for-character. Do not rephrase copy, re-order attributes, or "clean up" markup you weren't asked to touch.
+
+Visual elements and FULL FILE MODE:
+
+When the user's request involves changes to inline SVGs, icon paths, complex CSS patterns (gradients, pseudo-element backgrounds, clip-paths), or any element with long attribute values that are difficult to reproduce byte-exactly, prefer FULL FILE MODE over PATCH MODE. The SEARCH block in PATCH MODE requires byte-exact recall of these values, which is unreliable for SVG path data and complex CSS. FULL FILE MODE avoids this failure mode entirely. Use PATCH MODE for text edits, color token swaps, spacing changes, and other short, unambiguous changes — but for anything involving SVG \`d="..."\` attributes, complex \`background-image\` values, or pseudo-element content, default to FULL FILE MODE.
+
+When editing or generating inline SVGs, reference the exact SVG markup from the CURRENT FILE content provided above — do not reconstruct SVG path data from memory. If you cannot find the exact SVG in the current file (e.g. you're creating a new icon), generate clean, simple geometry appropriate to the icon's purpose.
 
 # Prose
 

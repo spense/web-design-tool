@@ -6,9 +6,11 @@ import Spinner from './Spinner.jsx';
 
 const MODELS = [
   { value: 'sonnet', label: 'Sonnet 4.6' },
+  { value: 'opus46', label: 'Opus 4.6' },
   { value: 'opus', label: 'Opus 4.7' },
   { value: 'haiku', label: 'Haiku 4.5' },
 ];
+const MODEL_LABELS = Object.fromEntries(MODELS.map(m => [m.value, m.label]));
 
 function formatDuration(secs) {
   if (secs == null) return '';
@@ -562,7 +564,7 @@ function StreamingMessage({ text, model, isUpdate, startedAt }) {
 
   return (
     <div className="chat-msg assistant">
-      <div className="who">assistant · {model}</div>
+      <div className="who">assistant · {MODEL_LABELS[model] || model}</div>
       <div className="body">
         {proseOnly}
         <span className="gen-status" style={{ marginTop: proseOnly ? 8 : 0, display: 'flex' }}>
@@ -588,7 +590,7 @@ function Message({ msg }) {
   return (
     <div className={`chat-msg ${msg.role}`}>
       <div className="who">
-        {msg.role}{msg.model ? ` · ${msg.model}` : ''}
+        {msg.role}{msg.model ? ` · ${MODEL_LABELS[msg.model] || msg.model}` : ''}
         {msg.duration != null ? ` (${formatDuration(msg.duration)})` : ''}
       </div>
       <div className="body">{msg.content}</div>
