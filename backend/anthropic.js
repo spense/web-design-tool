@@ -179,16 +179,19 @@ Rules:
 Why this matters: a Tools menu in the app rewrites these variable values in the source HTML. If a color is hardcoded, the menu can't change it — the design is "locked." Always use variables.
 
 Visual & content:
-- Modern, professional, conversion-focused (these are lead-gen sites)
+- Visual tone will be provided in the user prompt
 - Inline all CSS in a \`<style>\` tag in \`<head>\`
 - No external dependencies except reliable CDNs (Google Fonts is fine)
 - Use https://placehold.co/ for placeholder images
 - When the user attaches images, you'll see them listed in the user message as paths like \`uploads/photo.jpg\`. Use them in the design with \`<img src="uploads/photo.jpg" alt="...">\` exactly as listed — do not rename, do not embed base64, do not use absolute URLs. The frontend resolves these paths automatically and they survive in the export bundle.
 - **Attached images are real assets the user wants featured in the design — they are not optional reference material.** Every attached image MUST appear as a visible \`<img>\` somewhere in the rendered output. When the user specifies where an image goes ("use this for the hero", "this is Robert's headshot"), place it exactly there. When the user doesn't specify, infer the right placement from filename and context (e.g. \`hero.jpg\` → hero section, \`team-member-name.jpg\` → team section). Never replace an attached image with a placeholder, a CSS background that omits the \`<img>\` element, a black background, or any other substitute. If an attached image is meant for the hero, the hero must contain that \`<img>\`.
+- Images alt tags: Include an alt tag for any inline image used in the site. It can be based on surrounding/supporting text for the image, otherwise default to the image style, type, or filename. 
 - For icons (in feature lists, services, badges, buttons, etc.), default to inline single-color SVG icons. Use clean, simple geometry — line-art or solid silhouettes, 24×24 viewBox typical. Color is your call: use whatever fits the design — a token color (\`var(--color-primary)\`, \`var(--color-accent)\`), \`currentColor\` to inherit from surrounding text, or any other appropriate choice. Do NOT default to emojis, emoji characters, or unicode symbols (★, ✓, →, etc.) for icon roles. Emojis or graphical icons are only acceptable when the user explicitly asks for them.
 - Real business copy based on intake data — never lorem ipsum
-- Required sections: hero, services, about/why-us, social proof, service area, contact form (action="#"), footer
-- Contact form fields: name, phone, email, message, submit
+- Information architecture: Come up with an improved IA for each page based on the existing site structure.
+- Home page hero: Most sites will have a hero at the top of the home page, but it is best for you to determine this based on improvements you suggest from the home page. When you create a hero, it must be engaging and creative. It can include things like heading text, sub heading text, background (image, pattern, or texture), inline image(s), CTA blocks, contact info, etc. Not all these are required. Use your judgement on how best to build out the hero content.
+- Contact form: Sites should always include a contact form, either in a "contact" section, or "contact" page.
+- Contact fields: At least include the basics - name, phone, email, message, submit. More may be required depending on the business type and context of the site (such as a services dropdown, location dropdown, address fields, etc.)
 - Do NOT include any JavaScript form submission logic — no addEventListener('submit', ...), no fetch calls to form endpoints, no Web3Forms integration code (access keys, redirect inputs, success/error handling). Just build the HTML form with its fields, labels, and a submit button. The form action, hidden inputs, and submission behavior are wired up by a separate build pipeline after export.
 
 Page structure:
