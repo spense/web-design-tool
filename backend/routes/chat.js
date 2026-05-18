@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW } from '../anthropic.js';
+import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, pickRandomArchetype, detectArchetypeInPrompt } from '../anthropic.js';
 import { detectMissingPages, extractPlannedPages, parseFileBlocks } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions } from '../parsePatch.js';
 
@@ -20,6 +20,7 @@ router.get('/:jobId', (req, res) => {
 router.post('/', async (req, res, next) => {
   try {
     const { model, messages, context } = req.body || {};
+    console.log(`[chat] POST received — model=${model} messages=${messages?.length} hasContext=${!!context} hasCrawledData=${!!context?.crawledData} hasCurrentPages=${!!context?.currentPages}`);
     const client = getAnthropic();
     const resolvedModel = resolveModel(model);
     const jobId = randomUUID();
@@ -32,6 +33,22 @@ router.post('/', async (req, res, next) => {
     }
 
     let dynamicSystem = '';
+
+    // Inject a random layout archetype for first generations when the user
+    // prompt doesn't already specify one. This gives the model a concrete
+    // structural starting point instead of defaulting to the same pattern.
+    if (isFirstGeneration) {
+      const userText = (messages || [])
+        .filter(m => m.role === 'user')
+        .map(m => typeof m.content === 'string' ? m.content : '')
+        .join(' ');
+      if (!detectArchetypeInPrompt(userText)) {
+        const archetype = pickRandomArchetype();
+        dynamicSystem += `\n\n--- LAYOUT ARCHETYPE ---\nNo archetype was specified in the prompt. If the prompt contains enough design direction for you to choose a better-fit archetype from the catalog, do so and name it in your commentary. Otherwise, use: **${archetype}**. Adapt it to the business — it's a structural starting point, not a rigid spec.\n\nReminder: before generating HTML, state your IA decisions in the commentary — page structure (single/multi), what pages or sections you're building, and any changes from the existing site's structure. Then state which archetype you're using.`;
+        console.log(`[chat] injected random archetype: ${archetype}`);
+      }
+    }
+
     if (context?.activePage) {
       dynamicSystem += `\n\n--- ACTIVE CONTEXT ---\nThe user is currently viewing "${context.activePage}" in the design preview. If they ask for changes without specifying a page, assume they mean this page.`;
     }

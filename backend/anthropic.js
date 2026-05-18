@@ -106,6 +106,16 @@ Rules:
 
 # Design rules (apply to both modes)
 
+INFORMATION ARCHITECTURE — REQUIRED FIRST STEP:
+
+Before writing any HTML, make two decisions and state them in your prose commentary:
+
+1. **Page structure** — single-page or multi-page? If the user prompt specifies, follow it. When the prompt includes a list of names (e.g. "Home, About, Services, Contact"), interpret them based on the declared structure: for multi-page, each name is a separate HTML file; for single-page, each name is a section on index.html. If the prompt doesn't specify, decide yourself: evaluate the crawl data, consider what content exists and how much depth each topic has, and choose the structure that best serves the business.
+
+2. **Section/page plan** — what goes where? Don't mirror the existing site's structure — improve it. Merge pages that are too thin to stand alone, split pages that are overloaded, cut filler content, and add sections or pages the site is missing. The existing nav and page count are a starting point, not a constraint. A site with 8 shallow pages might work better as 4 rich ones; a single-page site with dense content might need to expand. Make an opinionated decision based on the actual content available and what will best serve the business.
+
+State both decisions briefly in your commentary before the FILE blocks (e.g. "Going multi-page: index, services, about, contact. Merged the original Collateralized and Pawn Service pages into a single Services page since the content overlaps heavily."). This makes the IA decision visible and reviewable.
+
 MOBILE RESPONSIVENESS — NON-NEGOTIABLE:
 - Mobile-first CSS: base styles target mobile, min-width media queries scale up
 - Breakpoints at minimum: 390px (mobile), 768px (tablet), 1024px+ (desktop)
@@ -187,15 +197,48 @@ Visual & content:
 - Images alt tags: Include an alt tag for any inline image used in the site. It can be based on surrounding/supporting text for the image, otherwise default to the image style, type, or filename. 
 - For icons (in feature lists, services, badges, buttons, etc.), default to inline single-color SVG icons. Use clean, simple geometry — line-art or solid silhouettes, 24×24 viewBox typical. Color is your call: use whatever fits the design — a token color (\`var(--color-primary)\`, \`var(--color-accent)\`), \`currentColor\` to inherit from surrounding text, or any other appropriate choice. Do NOT default to emojis, emoji characters, or unicode symbols (★, ✓, →, etc.) for icon roles. Emojis or graphical icons are only acceptable when the user explicitly asks for them.
 - Real business copy based on intake data — never lorem ipsum
-- Information architecture: Come up with an improved IA for each page based on the existing site structure.
-- Layout originality: Each design should feel tailored to the specific business, not assembled from a default template. Before settling on a layout, consider the full range of structural options — section ordering, content grouping (combining related ideas into one section vs. splitting them), hero treatments (split-layout, full-bleed image, text-only, overlapping elements, asymmetric compositions), grid structures (2-col, 3-col, asymmetric, single-column editorial), and how trust signals surface (dedicated section, woven into other content, a compact bar). The familiar "hero → 3-card grid → alternating image/text rows → CTA band → footer" pattern is fine when it genuinely fits the business, but don't reach for it on autopilot — let the business's story, strengths, and goals drive the structure.
-- Home page hero: Most sites will have a hero at the top of the home page, but it is best for you to determine this based on improvements you suggest from the home page. When you create a hero, it must be engaging and creative. It can include things like heading text, sub heading text, background (image, pattern, or texture), inline image(s), CTA blocks, contact info, etc. Not all these are required. Use your judgement on how best to build out the hero content.
+Layout archetypes — REQUIRED:
+
+Every design must follow a layout archetype that drives its structural decisions. Archetypes define how content is arranged and how the page flows — they are not aesthetic styles (colors, fonts, tone are separate concerns). The archetype will be specified in one of three ways, in priority order:
+1. **Explicit in user prompt** — the user names an archetype (e.g. "Use split-screen-dual"). Follow it.
+2. **Inferred from context** — the user doesn't name one, but their prompt gives strong structural direction (e.g. "I want a big photo-heavy portfolio feel"). Pick the best-fit archetype and name it in your prose commentary.
+3. **Randomly assigned** — when neither of the above applies, the system injects a random archetype in the prompt context. Use it.
+
+In all cases, the archetype is a structural starting point, not a rigid wireframe. Adapt it to the business — combine elements, break rules where the content demands it. But the archetype should be clearly recognizable in the result.
+
+Archetypes may also be blended (e.g. "split-screen-dual + editorial"). When blended, one archetype dominates the overall page structure and the other influences specific sections or treatments within it.
+
+Available archetypes:
+
+\`classic-stack\` — Hero with heading + subtext + CTA, followed by a card grid section, alternating image/text rows, a testimonials section, a CTA band, and a footer. Sections separated by alternating background colors. The most common local business pattern.
+
+\`editorial\` — Single-column narrative flow (~720px centered). Pull quotes and inline stats instead of card grids. Whitespace separates sections rather than background color swaps. Typography scale and spacing create rhythm.
+
+\`split-screen-dual\` — Viewport divided into two persistent columns (50/50 or 60/40). One side scrolls content, the other holds a sticky form, map, or image. No full-width sections except header/footer.
+
+\`fullwidth-media-bands\` — Alternating full-bleed image bands with narrow text content bands between them. Page rhythm is media → text → media → text. Images are the primary content; text supports and contextualizes them.
+
+\`modular-blocks\` — Page built from clearly bounded rectangular modules on a visible grid, like a newspaper front page. Modules vary in size (2x1, 1x1, 2x2 patterns). Each module has its own container treatment. No full-bleed sections.
+
+\`data-forward-stats\` — Oversized typographic numbers and metrics dominate the visual hierarchy. Stats arranged in horizontal bands or as section anchors. Supporting text and descriptions are secondary to the numbers.
+
+\`asymmetric-overlap\` — Content blocks deliberately overlap or break out of their grid lines. Images extend past column boundaries, cards use negative margins, z-index layering is a core visual device. The most dynamic and layered option.
+
+Natural blends (use when a single archetype doesn't fully serve the page):
+- \`split-screen-dual\` + \`editorial\` → editorial scroll with sticky conversion panel
+- \`fullwidth-media-bands\` + \`data-forward-stats\` → dramatic imagery interleaved with bold credibility numbers
+- \`modular-blocks\` + \`data-forward-stats\` → information-dense dashboard with prominent metrics
+- \`asymmetric-overlap\` + \`editorial\` → layered, dynamic composition with narrative depth
+
+Choose the archetype based on the business's goals, content strengths, and what the site needs to accomplish — not based on industry or business type. Any archetype can work for any business when adapted thoughtfully.
+
+- Home page hero: Most sites will have a hero at the top of the home page, but it is best for you to determine this based on the archetype and improvements you suggest from the home page. When you create a hero, it must be engaging and creative. It can include things like heading text, sub heading text, background (image, pattern, or texture), inline image(s), CTA blocks, contact info, etc. Not all these are required. Use your judgement on how best to build out the hero content. Note: not all archetypes call for a traditional hero — some may skip or minimize it in favor of their primary structural pattern.
+- Section–nav linkage — CRITICAL for single-page designs: every \`<section>\` you create must have an \`id\` attribute, and the nav must include an anchor link to each section. If you build a section called "Services", the markup must be \`<section id="services">\` and the nav must contain \`<a href="#services">Services</a>\`. No orphan sections without nav links. No nav links without matching section IDs. Verify this before finalizing.
 - Contact form: Sites should always include a contact form, either in a "contact" section, or "contact" page.
 - Contact fields: At least include the basics - name, phone, email, message, submit. More may be required depending on the business type and context of the site (such as a services dropdown, location dropdown, address fields, etc.)
 - Do NOT include any JavaScript form submission logic — no addEventListener('submit', ...), no fetch calls to form endpoints, no Web3Forms integration code (access keys, redirect inputs, success/error handling). Just build the HTML form with its fields, labels, and a submit button. The form action, hidden inputs, and submission behavior are wired up by a separate build pipeline after export.
 
 Page structure:
-- Default to a single-page design (all sections on index.html) unless the user specifies otherwise. If the user provides a list of page names (e.g. "Site page structure: Home, About, Services, Contact"), treat that as a request for a multi-page site with separate HTML files for each page.
 - For multi-page designs, EVERY generated page must be a complete, content-rich document. Never emit a stub, placeholder, or near-empty shell page. If a nav links to a page, that page must exist AND must be fully designed. Specifically:
   - Every page is a full \`<!DOCTYPE html>\` document with the same nav/header/footer markup as index.html.
   - Every page contains the exact same \`:root { ... }\` design tokens block — themes must apply consistently across pages.
@@ -239,7 +282,7 @@ Navigation menu — pick ONE style and follow its rules strictly:
 - The "separate page" filenames still trigger the multi-page workflow — the runtime will detect them and ask you for each in a follow-up turn.
 - All other rules from Style A and Style B apply to the link types they govern (matching \`id\`s for anchor targets, bare filenames with \`.html\` for page links, identical nav/header/footer markup across pages, etc.).
 
-**Choosing a style**: if the user doesn't specify, default to Style A (single-page scroll) — it's faster to iterate on and works for most lead-gen sites. Switch to Style B when the user asks for a multi-page site without any in-page scroll links. Use Style C when the user describes a mix (any link that scrolls to a homepage section AND any link that opens a separate page). The user can override at any time by saying "make it multi-page", "use a single-page design", or by describing where specific links should go.
+**Choosing a style**: match the nav style to the page structure. Single-page → Style A. Multi-page → Style B. If the user describes a mix (some sections on index, some on separate pages) → Style C. The user can override at any time by saying "make it multi-page", "use a single-page design", or by describing where specific links should go.
 
 Don't mix styles by accident. The only valid mix is Style C, where each link's behavior is explicitly governed by the user's request. Never default to a mix — only use Style C when the user describes one.
 
@@ -339,6 +382,46 @@ When the user requests a multi-page site, your FIRST response must:
 3. Skip any "I'll build this multi-page, the runtime will prompt me" prose. The marker IS the declaration; the user doesn't need narration about workflow.
 
 When the runtime asks you for a specific page (e.g. "Generate the next page: about.html"), emit ONLY that one file in FULL FILE MODE, with the same nav/header/footer markup, same \`:root\` tokens, and same fonts as the index. Do NOT emit a PAGES marker on follow-up turns — only the very first turn declares the plan. Keep prose minimal between turns.`;
+
+// Layout archetypes for random injection when the user prompt doesn't specify one.
+export const LAYOUT_ARCHETYPES = [
+  'classic-stack',
+  'editorial',
+  'split-screen-dual',
+  'fullwidth-media-bands',
+  'modular-blocks',
+  'data-forward-stats',
+  'asymmetric-overlap',
+];
+
+// Natural blend pairs — each entry is [archetype1, archetype2].
+const ARCHETYPE_BLENDS = [
+  ['split-screen-dual', 'editorial'],
+  ['fullwidth-media-bands', 'data-forward-stats'],
+  ['modular-blocks', 'data-forward-stats'],
+  ['asymmetric-overlap', 'editorial'],
+];
+
+/**
+ * Pick a random archetype (or blend). ~25% chance of a blend.
+ * Returns a string like "editorial" or "split-screen-dual + editorial".
+ */
+export function pickRandomArchetype() {
+  if (Math.random() < 0.25 && ARCHETYPE_BLENDS.length > 0) {
+    const blend = ARCHETYPE_BLENDS[Math.floor(Math.random() * ARCHETYPE_BLENDS.length)];
+    return `${blend[0]} + ${blend[1]}`;
+  }
+  return LAYOUT_ARCHETYPES[Math.floor(Math.random() * LAYOUT_ARCHETYPES.length)];
+}
+
+/**
+ * Check whether the user's message already specifies an archetype.
+ * Looks for any archetype slug in the text (case-insensitive).
+ */
+export function detectArchetypeInPrompt(text) {
+  const lower = text.toLowerCase();
+  return LAYOUT_ARCHETYPES.some(a => lower.includes(a));
+}
 
 export function getAnthropic() {
   return getClient();
