@@ -179,7 +179,6 @@ Rules:
 Why this matters: a Tools menu in the app rewrites these variable values in the source HTML. If a color is hardcoded, the menu can't change it — the design is "locked." Always use variables.
 
 Visual & content:
-- Visual tone will be provided in the user prompt
 - Inline all CSS in a \`<style>\` tag in \`<head>\`
 - No external dependencies except reliable CDNs (Google Fonts is fine)
 - Use https://placehold.co/ for placeholder images
@@ -189,13 +188,14 @@ Visual & content:
 - For icons (in feature lists, services, badges, buttons, etc.), default to inline single-color SVG icons. Use clean, simple geometry — line-art or solid silhouettes, 24×24 viewBox typical. Color is your call: use whatever fits the design — a token color (\`var(--color-primary)\`, \`var(--color-accent)\`), \`currentColor\` to inherit from surrounding text, or any other appropriate choice. Do NOT default to emojis, emoji characters, or unicode symbols (★, ✓, →, etc.) for icon roles. Emojis or graphical icons are only acceptable when the user explicitly asks for them.
 - Real business copy based on intake data — never lorem ipsum
 - Information architecture: Come up with an improved IA for each page based on the existing site structure.
+- Layout originality: Each design should feel tailored to the specific business, not assembled from a default template. Before settling on a layout, consider the full range of structural options — section ordering, content grouping (combining related ideas into one section vs. splitting them), hero treatments (split-layout, full-bleed image, text-only, overlapping elements, asymmetric compositions), grid structures (2-col, 3-col, asymmetric, single-column editorial), and how trust signals surface (dedicated section, woven into other content, a compact bar). The familiar "hero → 3-card grid → alternating image/text rows → CTA band → footer" pattern is fine when it genuinely fits the business, but don't reach for it on autopilot — let the business's story, strengths, and goals drive the structure.
 - Home page hero: Most sites will have a hero at the top of the home page, but it is best for you to determine this based on improvements you suggest from the home page. When you create a hero, it must be engaging and creative. It can include things like heading text, sub heading text, background (image, pattern, or texture), inline image(s), CTA blocks, contact info, etc. Not all these are required. Use your judgement on how best to build out the hero content.
 - Contact form: Sites should always include a contact form, either in a "contact" section, or "contact" page.
 - Contact fields: At least include the basics - name, phone, email, message, submit. More may be required depending on the business type and context of the site (such as a services dropdown, location dropdown, address fields, etc.)
 - Do NOT include any JavaScript form submission logic — no addEventListener('submit', ...), no fetch calls to form endpoints, no Web3Forms integration code (access keys, redirect inputs, success/error handling). Just build the HTML form with its fields, labels, and a submit button. The form action, hidden inputs, and submission behavior are wired up by a separate build pipeline after export.
 
 Page structure:
-- Default to a single-page design (all sections on index.html) unless the user specifies otherwise.
+- Default to a single-page design (all sections on index.html) unless the user specifies otherwise. If the user provides a list of page names (e.g. "Site page structure: Home, About, Services, Contact"), treat that as a request for a multi-page site with separate HTML files for each page.
 - For multi-page designs, EVERY generated page must be a complete, content-rich document. Never emit a stub, placeholder, or near-empty shell page. If a nav links to a page, that page must exist AND must be fully designed. Specifically:
   - Every page is a full \`<!DOCTYPE html>\` document with the same nav/header/footer markup as index.html.
   - Every page contains the exact same \`:root { ... }\` design tokens block — themes must apply consistently across pages.
