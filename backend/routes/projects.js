@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { listProjects, getProject, createProject, saveProject, renameProject, deleteProject, duplicateProject } from '../storage.js';
+import { listProjects, getProject, createProject, saveProject, renameProject, deleteProject, duplicateProject, getHistory, getHistoryEntry, pruneHistoryAfter } from '../storage.js';
 
 const router = Router();
 
@@ -13,6 +13,29 @@ router.post('/', async (req, res, next) => {
   try {
     const { name } = req.body || {};
     res.json(await createProject({ name }));
+  } catch (e) { next(e); }
+});
+
+router.get('/:slug/history', async (req, res, next) => {
+  try {
+    res.json(await getHistory(req.params.slug));
+  } catch (e) { next(e); }
+});
+
+router.get('/:slug/history/:timestamp', async (req, res, next) => {
+  try {
+    const entry = await getHistoryEntry(req.params.slug, req.params.timestamp);
+    if (!entry) return res.status(404).json({ error: 'History entry not found' });
+    res.json(entry);
+  } catch (e) { next(e); }
+});
+
+router.post('/:slug/history/prune', async (req, res, next) => {
+  try {
+    const { after } = req.body || {};
+    if (!after) return res.status(400).json({ error: 'after timestamp required' });
+    await pruneHistoryAfter(req.params.slug, after);
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 

@@ -16,14 +16,19 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
   const [exporting, setExporting] = useState(false);
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const autoFaviconRef = useRef(new Set());
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyRef = useRef({ list: [], index: -1 });
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api.getProject(tab.slug)
-      .then(d => {
+    Promise.all([api.getProject(tab.slug), api.getHistory(tab.slug)])
+      .then(([d, h]) => {
         if (cancelled) return;
         setData(d);
+        setHistory(h);
+        setHistoryIndex(h.length - 1);
         const firstPage = Object.keys(d.pages || {})[0];
         if (firstPage) setActivePage(firstPage);
       })
@@ -32,9 +37,23 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     return () => { cancelled = true; };
   }, [tab.slug]);
 
-  const persist = useCallback(async (next) => {
+  useEffect(() => {
+    historyRef.current = { list: history, index: historyIndex };
+  }, [history, historyIndex]);
+
+  const persist = useCallback(async (next, { skipHistory } = {}) => {
     setData(next);
-    try { await api.saveProject(tab.slug, next); } catch (e) { console.error(e); }
+    if (skipHistory) return;
+    try {
+      const { list, index } = historyRef.current;
+      if (list.length > 0 && index >= 0 && index < list.length - 1) {
+        await api.pruneHistory(tab.slug, list[index]);
+      }
+      await api.saveProject(tab.slug, next);
+      const h = await api.getHistory(tab.slug);
+      setHistory(h);
+      setHistoryIndex(h.length - 1);
+    } catch (e) { console.error(e); }
   }, [tab.slug]);
 
   const updatePages = useCallback((newPages, newMessages, newProject) => {
@@ -73,6 +92,33 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     setData(d => d ? { ...d, project: { ...d.project, favicon } } : d);
     onUpdateTab?.({ favicon });
   }, [data, onUpdateTab]);
+
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
+
+  const handleUndo = useCallback(async () => {
+    if (historyIndex <= 0 || !history.length) return;
+    const targetIndex = historyIndex - 1;
+    try {
+      const entry = await api.getHistoryEntry(tab.slug, history[targetIndex]);
+      if (entry?.pages) {
+        setData(d => d ? { ...d, pages: entry.pages } : d);
+        setHistoryIndex(targetIndex);
+      }
+    } catch (e) { console.error('undo failed', e); }
+  }, [tab.slug, history, historyIndex]);
+
+  const handleRedo = useCallback(async () => {
+    if (historyIndex >= history.length - 1) return;
+    const targetIndex = historyIndex + 1;
+    try {
+      const entry = await api.getHistoryEntry(tab.slug, history[targetIndex]);
+      if (entry?.pages) {
+        setData(d => d ? { ...d, pages: entry.pages } : d);
+        setHistoryIndex(targetIndex);
+      }
+    } catch (e) { console.error('redo failed', e); }
+  }, [tab.slug, history, historyIndex]);
 
   // Auto-generate a monogram favicon the first time this project has pages.
   // Skipped on every subsequent design revision — the user regenerates manually.
@@ -211,6 +257,10 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
         onScrollAnimationsChange={handleScrollAnimationsChange}
         chatCollapsed={chatCollapsed}
         onToggleChatCollapsed={() => setChatCollapsed(c => !c)}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
       />
       {exportResult && (
         <ExportModal

@@ -9,13 +9,12 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo }) {
   const [viewport, setViewport] = useState('desktop');
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const iframeRef = useRef(null);
   const pageDropdownRef = useRef(null);
-  const toolsUpdateRef = useRef(false);
   const savedScrollRef = useRef(0);
   const scrollAnimationsRef = useRef(scrollAnimations);
   scrollAnimationsRef.current = scrollAnimations;
@@ -25,12 +24,9 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   const rawHtml = pages?.[activePage] || '';
   const html = rawHtml ? rewriteUploadsUrls(rawHtml, slug) : '';
 
-  // Sync displayHtml from non-tools changes (chat responses, page switches).
+  // Sync displayHtml whenever the underlying html changes (chat responses,
+  // page switches, tools changes, undo/redo).
   useEffect(() => {
-    if (toolsUpdateRef.current) {
-      toolsUpdateRef.current = false;
-      return;
-    }
     // Save scroll position before the iframe reloads with new srcDoc
     try {
       const win = iframeRef.current?.contentWindow;
@@ -40,8 +36,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   }, [html]);
 
   const handleApplyTokens = (newPages) => {
-    toolsUpdateRef.current = true;
-    // Apply CSS vars + fonts directly to live iframe DOM (no reload, scroll preserved)
+    // Apply CSS vars + fonts directly to live iframe DOM for instant feedback;
     try {
       const iframe = iframeRef.current;
       const doc = iframe?.contentDocument;
@@ -238,6 +233,20 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 onScrollAnimationsChange={onScrollAnimationsChange}
               />
             )}
+          </div>
+          <div className="undo-redo">
+            <button onClick={onUndo} disabled={!canUndo} title="Undo">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2.5 5.5H10C11.933 5.5 13.5 7.067 13.5 9C13.5 10.933 11.933 12.5 10 12.5H7.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M5.5 2.5L2.5 5.5L5.5 8.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+            <button onClick={onRedo} disabled={!canRedo} title="Redo">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12.5 5.5H5C3.067 5.5 1.5 7.067 1.5 9C1.5 10.933 3.067 12.5 5 12.5H7.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M9.5 2.5L12.5 5.5L9.5 8.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
           </div>
         </div>
         <div className="center">

@@ -99,12 +99,17 @@ export async function saveProject(slug, { project, pages, session }) {
     }
     await writeJson(path.join(dir, 'project.json'), project);
   }
-  if (pages) await writeJson(path.join(dir, 'pages.json'), pages);
+  let pagesChanged = false;
+  if (pages) {
+    const existingPages = await readJson(path.join(dir, 'pages.json'), {});
+    pagesChanged = JSON.stringify(pages) !== JSON.stringify(existingPages);
+    await writeJson(path.join(dir, 'pages.json'), pages);
+  }
   if (session) await writeJson(path.join(dir, 'session.json'), session);
-  if (pages || session) {
+  if (pagesChanged) {
     await writeJson(path.join(dir, 'history', `${now.replace(/[:.]/g, '-')}.json`), {
       timestamp: now,
-      pages: pages || undefined,
+      pages,
       lastMessage: session?.messages?.[session.messages.length - 1] || null,
     });
   }
@@ -206,6 +211,52 @@ export async function duplicateProject(slug) {
   };
   await writeJson(path.join(projectDir(newSlug), 'project.json'), updated);
   return updated;
+}
+
+export async function getHistory(slug) {
+  const dir = path.join(projectDir(slug), 'history');
+  try {
+    const files = await fs.readdir(dir);
+    return files
+      .filter(f => f.endsWith('.json'))
+      .sort()
+      .map(f => f.replace('.json', ''));
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+}
+
+export async function getHistoryEntry(slug, timestamp) {
+  const file = path.join(projectDir(slug), 'history', `${timestamp}.json`);
+  return readJson(file, null);
+}
+
+export async function restoreHistory(slug, timestamp, prune = false) {
+  const entry = await getHistoryEntry(slug, timestamp);
+  if (!entry || !entry.pages) return null;
+
+  await writeJson(path.join(projectDir(slug), 'pages.json'), entry.pages);
+
+  if (prune) {
+    const historyDir = path.join(projectDir(slug), 'history');
+    const files = await fs.readdir(historyDir);
+    const toDelete = files.filter(f => f.endsWith('.json') && f.replace('.json', '') > timestamp);
+    await Promise.all(toDelete.map(f => fs.unlink(path.join(historyDir, f))));
+  }
+
+  return entry;
+}
+
+export async function pruneHistoryAfter(slug, timestamp) {
+  const historyDir = path.join(projectDir(slug), 'history');
+  try {
+    const files = await fs.readdir(historyDir);
+    const toDelete = files.filter(f => f.endsWith('.json') && f.replace('.json', '') > timestamp);
+    await Promise.all(toDelete.map(f => fs.unlink(path.join(historyDir, f))));
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
 }
 
 async function exists(p) {
