@@ -85,6 +85,7 @@ Every call to `saveProject` snapshots `pages.json` + last message into `history/
 
 ```
 opus   → claude-opus-4-7
+opus46 → claude-opus-4-6
 sonnet → claude-sonnet-4-6
 haiku  → claude-haiku-4-5
 ```
@@ -95,14 +96,17 @@ Default in UI is sonnet; user can switch per turn. `project.lastModel` is persis
 
 The `SYSTEM_PROMPT` covers:
 
-- **Output mode selection**: FULL FILE vs PATCH (see below).
+- **Output mode selection**: FULL FILE vs PATCH vs REGION (see below).
+- **Information architecture (IA) — required first step** — before generating HTML, the model must make and state two decisions in its prose commentary: (1) single-page or multi-page, and (2) the section/page plan. The model is instructed to improve on the existing site's structure — merge thin pages, split overloaded ones, cut filler, add what's missing. The existing site's nav and page count are a starting point, not a constraint.
+- **Layout archetypes** — every design must follow a structural archetype that drives layout decisions. Seven archetypes are defined: `classic-stack`, `editorial`, `split-screen-dual`, `fullwidth-media-bands`, `modular-blocks`, `data-forward-stats`, `asymmetric-overlap`. Selection priority: (1) explicit in user prompt, (2) inferred from prompt context, (3) randomly assigned by the backend. Four blend pairs are also defined. On first generation, if no archetype is detected in the user prompt, `chat.js` injects a random one into the dynamic system context (see "Random archetype injection" below).
 - **Design tokens contract** — required `:root` CSS variables for colors, typography, spacing, border-radius, shadows. **Every brand/theme color must reference `var(--color-…)`, not a literal.** Major spacing, body/heading font-size, border-radius, and font-family are also thematic. The contract exists so the Tools menu can swap themes by rewriting `:root` without re-running the model.
 - **Section backgrounds must use vars** — hero sections, CTA bands, footers, nav bars — no hardcoded hex/rgb for backgrounds. Dark sections on a light design must define dedicated tokens (e.g. `--color-surface-inverse`, `--color-text-inverse`) in `:root`. Without this, theme switching leaves hardcoded backgrounds unchanged while text color swaps, causing illegible combinations.
 - **Mobile responsiveness** — mobile-first CSS, breakpoints at 390/768/1024+, fluid images, 44px touch targets.
 - **Header/content alignment** — when the header uses the same `max-width` as content sections, horizontal padding must not misalign it. Either drop padding above the max-width breakpoint, or include it in the max-width calc.
-- **Visual rules** — inline CSS in `<style>` in `<head>`, no external deps except Google Fonts, `https://placehold.co/` for placeholders, real business copy (no lorem), inline single-color SVG icons (no emojis), required sections for landing pages.
+- **Visual rules** — inline CSS in `<style>` in `<head>`, no external deps except Google Fonts, `https://placehold.co/` for placeholders, real business copy (no lorem), inline single-color SVG icons (no emojis).
+- **Section–nav linkage** — for single-page designs, every `<section>` must have an `id` and the nav must link to it. No orphan sections or dead nav links.
 - **Multi-page rules** — every linked page must be a complete document with the same nav/header/footer markup and same `:root` tokens; page-appropriate body content.
-- **Nav styles** — Style A: in-page anchors (`#services`) for single-page; Style B: bare filenames (`about.html`) for multi-page. Never mixed.
+- **Nav styles** — Style A: in-page anchors (`#services`) for single-page; Style B: bare filenames (`about.html`) for multi-page; Style C: hybrid when the user describes a mix.
 - **Nav trigger / hamburger rules** — checkbox+label pattern (no JS), one of three patterns (standard responsive, always-trigger drawer, hybrid), trigger lives in header layout, opened menu renders as its own positioned surface.
 - **Anti-meta rules** — no design-rationale comments in HTML, no "Designed by X" attribution, no "Style Guide" sections.
 
@@ -115,12 +119,14 @@ body: { model, messages, context: { crawledData, activePage, currentPages } }
 
 The system prompt is split into **two blocks** to maximize prompt caching:
 
-1. **Cached** (`cache_control: ephemeral`): `SYSTEM_PROMPT` + crawled intake data. Stable for the life of a project.
-2. **Uncached**: active-page hint + every current file's full contents. Changes every turn.
+1. **Cached** (`cache_control: ephemeral`): `SYSTEM_PROMPT` + `MULTI_PAGE_WORKFLOW` (first gen only) + crawled intake data. Stable for the life of a project.
+2. **Uncached (dynamic)**: random archetype injection (first gen only, see below) + active-page hint + every current file's full contents. Changes every turn.
+
+**Random archetype injection**: on first generation, `chat.js` checks whether the user's message contains a recognized archetype slug. If not, it calls `pickRandomArchetype()` (exported from `anthropic.js`) to select a random archetype (with ~25% chance of a blend pair) and injects it into the dynamic system block. This gives the model a concrete structural starting point instead of defaulting to the same pattern. The injection also reminds the model to state its IA decisions and archetype choice in commentary. The selected archetype is logged: `[chat] injected random archetype: X`.
 
 The model sees the full current state of every file under `<!-- CURRENT FILE: name -->` headers — that's what enables byte-exact PATCH SEARCH matching.
 
-The endpoint streams Anthropic SSE deltas back to the client and emits a final `done` event with `{ text, stopReason, usage }`. `max_tokens: 32000`. Every completed turn logs `[chat] model=… stop=… in=… out=… cache_write=… cache_read=…` — `stop=max_tokens` is the truncation signal.
+The endpoint streams Anthropic SSE deltas back to the client and emits a final `done` event with `{ text, stopReason, usage }`. `max_tokens: 64000`. Every completed turn logs `[chat] model=… stop=… in=… out=… cache_write=… cache_read=…` — `stop=max_tokens` is the truncation signal.
 
 ---
 
@@ -165,7 +171,7 @@ The original symptom: a multi-page restyle hit `max_tokens` mid-output, the FULL
 
 Three layers prevent recurrence:
 
-1. **`max_tokens: 32000`** in `backend/routes/chat.js`. Up from 16K — comfortably fits a multi-page restyle.
+1. **`max_tokens: 64000`** in `backend/routes/chat.js`. Comfortably fits a multi-page restyle.
 2. **`stop_reason` propagation**. Backend forwards `stop_reason` in the `done` SSE event. Frontend `streamChat` returns it. `ChatPanel` raises a "Response hit the output token limit and was truncated" system message when it equals `"max_tokens"`.
 3. **Page completeness gate** (`frontend/src/parseFiles.js:isCompleteHtmlDoc`). Before persisting, every FULL FILE block must contain `<body` and end with `</html>`. Failures are listed in a "Skipped writing incomplete file(s)" system message; the previous good copy is preserved. The parser also strips trailing prose from file content so model commentary after `</html>` doesn't false-flag the check.
 
