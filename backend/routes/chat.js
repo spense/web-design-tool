@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, pickRandomArchetype, detectArchetypeInPrompt } from '../anthropic.js';
 import { detectMissingPages, extractPlannedPages, parseFileBlocks } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions } from '../parsePatch.js';
+import { extractSearchTerms, buildImagePool, formatPoolForPrompt, cleanupUnusedImages, listExistingPool } from '../pixabay.js';
 
 const router = Router();
 
@@ -59,11 +60,6 @@ router.post('/', async (req, res, next) => {
       }
     }
 
-    const systemBlocks = [
-      { type: 'text', text: cachedSystem, cache_control: { type: 'ephemeral' } },
-    ];
-    if (dynamicSystem) systemBlocks.push({ type: 'text', text: dynamicSystem });
-
     const job = { status: 'running', fullText: '', result: null, error: null };
     jobs.set(jobId, job);
     // Expire job after 10 minutes regardless of outcome.
@@ -76,6 +72,47 @@ router.post('/', async (req, res, next) => {
 
     // Send jobId first so the client can poll if the connection drops.
     res.write(`event: jobId\ndata: ${JSON.stringify({ jobId })}\n\n`);
+
+    const safeWriteEarly = (chunk) => {
+      if (!res.writableEnded) { try { res.write(chunk); } catch {} }
+    };
+
+    // Pixabay image pool: search and download before generation starts.
+    if (process.env.PIXABAY_API_KEY && context?.slug) {
+      try {
+        safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
+        const userText = (messages || [])
+          .filter(m => m.role === 'user')
+          .map(m => typeof m.content === 'string' ? m.content : '')
+          .join(' ');
+
+        const existing = isFirstGeneration ? [] : await listExistingPool(context.slug);
+        const needsNewImages = isFirstGeneration
+          || existing.length === 0
+          || /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|unsplash|pixabay)\b/i.test(userText);
+
+        if (needsNewImages) {
+          const searchTerms = await extractSearchTerms(context.crawledData, userText);
+          console.log(`[chat] pixabay search terms: ${searchTerms.join(', ')}`);
+          const pool = await buildImagePool(context.slug, searchTerms);
+          const combined = [...existing, ...pool.filter(p => !existing.some(e => e.path === p.path))];
+          if (combined.length > 0) {
+            dynamicSystem += formatPoolForPrompt(combined);
+          }
+        } else {
+          if (existing.length > 0) {
+            dynamicSystem += formatPoolForPrompt(existing);
+          }
+        }
+      } catch (err) {
+        console.error('[chat] pixabay image pool failed, continuing without:', err.message);
+      }
+    }
+
+    const systemBlocks = [
+      { type: 'text', text: cachedSystem, cache_control: { type: 'ephemeral' } },
+    ];
+    if (dynamicSystem) systemBlocks.push({ type: 'text', text: dynamicSystem });
 
     let clientConnected = true;
     req.on('close', () => { clientConnected = false; });
@@ -195,6 +232,26 @@ router.post('/', async (req, res, next) => {
           ];
           const turn = await runTurn(followUpMessages);
           assistantSoFar += turn.turnText;
+        }
+      }
+
+      // Clean up unused Pixabay images after generation.
+      if (process.env.PIXABAY_API_KEY && context?.slug) {
+        try {
+          const currentPages = context?.currentPages || {};
+          const { files: newFiles } = parseFileBlocks(job.fullText);
+          const regions = parseRegionBlocks(job.fullText);
+          let mergedPages = { ...currentPages, ...newFiles };
+          if (regions.length > 0) {
+            mergedPages = applyRegions(mergedPages, regions).updatedPages;
+          }
+          const { edits } = parsePatchBlocks(job.fullText);
+          if (Object.keys(edits).length > 0) {
+            mergedPages = applyPatches(mergedPages, edits).updatedPages;
+          }
+          await cleanupUnusedImages(context.slug, mergedPages);
+        } catch (err) {
+          console.error('[chat] pixabay cleanup failed:', err.message);
         }
       }
 

@@ -25,6 +25,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [crawling, setCrawling] = useState(false);
+  const [preparingImages, setPreparingImages] = useState(false);
   const [attachments, setAttachments] = useState([]);
   const messagesRef = useRef(null);
   const panelRef = useRef(null);
@@ -293,8 +294,8 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   }, [messages, streamingText, crawling]);
 
   useEffect(() => {
-    onStreamingChangeRef.current?.(streaming || crawling);
-  }, [streaming, crawling]);
+    onStreamingChangeRef.current?.(streaming || crawling || preparingImages);
+  }, [streaming, crawling, preparingImages]);
 
   useEffect(() => {
     return () => { onStreamingChangeRef.current?.(false); };
@@ -386,11 +387,13 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
         model,
         messages: apiMessages,
         context: {
+          slug: project.slug,
           crawledData: updatedProject.crawledData,
           activePage,
           currentPages: pages,
         },
-        onDelta: (_d, full) => setStreamingText(full),
+        onDelta: (_d, full) => { setPreparingImages(false); setStreamingText(full); },
+        onPreparingImages: () => setPreparingImages(true),
         onJobId: (jid) => {
           jobIdRef.current = jid;
           localStorage.setItem(storageKey, JSON.stringify({
@@ -404,6 +407,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     } catch (e) {
       if (e.name === 'AbortError' || abortRef.current?.signal.aborted) {
         localStorage.removeItem(storageKey);
+        setPreparingImages(false);
         return;
       }
       // Stream dropped — fall back to polling if we have a jobId.
@@ -417,6 +421,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           const errMsg = { role: 'system', content: `Error: ${pollErr.message}`, timestamp: new Date().toISOString() };
           onUpdate(undefined, [...newMessages, errMsg], updatedProject);
           setStreaming(false);
+          setPreparingImages(false);
           setStreamingText('');
           return;
         }
@@ -425,6 +430,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
         const errMsg = { role: 'system', content: `Error: ${e.message}`, timestamp: new Date().toISOString() };
         onUpdate(undefined, [...newMessages, errMsg], updatedProject);
         setStreaming(false);
+        setPreparingImages(false);
         setStreamingText('');
         return;
       }
@@ -452,13 +458,14 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   return (
     <div className="chat-panel" ref={panelRef}>
       <div className="chat-messages" ref={messagesRef}>
-        {messages.length === 0 && !streaming && !crawling && (
+        {messages.length === 0 && !streaming && !crawling && !preparingImages && (
           <div className="chat-empty">
             Paste a URL to crawl, or describe the site you want to design.
           </div>
         )}
         {messages.map((m, i) => <Message key={i} msg={m} />)}
         {crawling && <div className="chat-msg system"><div className="body">Crawling…</div></div>}
+        {preparingImages && <div className="chat-msg system"><div className="body">Preparing images…</div></div>}
         {streaming && (
           <StreamingMessage
             text={streamingText}

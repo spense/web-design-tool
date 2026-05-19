@@ -335,6 +335,9 @@ function resolveLink(href, pages, doc) {
 function rewriteUploadsUrls(html, slug) {
   if (!slug) return html;
   const base = `http://localhost:3001/api/projects/${slug}/uploads/`;
-  return html.replace(/(src|href)=(['"])(?:\.\/)?uploads\/([^'"]+)\2/g,
+  let result = html.replace(/(src|href)=(['"])(?:\.\/)?uploads\/([^'"]+)\2/g,
     (_, attr, q, file) => `${attr}=${q}${base}${file}${q}`);
+  result = result.replace(/url\((['"]?)(?:\.\/)?uploads\/([^)'"\s]+)\1\)/g,
+    (_, q, file) => `url(${q}${base}${file}${q})`);
+  return result;
 }

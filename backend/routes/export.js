@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import { getProject, projectDir } from '../storage.js';
 import { extractAndDedupCss } from '../cssExtractor.js';
 import { buildMonogramSvg, isImportedPlaceholder } from '../faviconSvg.js';
+import { cleanupUnusedImages } from '../pixabay.js';
 
 const router = Router();
 
@@ -135,6 +136,9 @@ async function runExport(slug, project, pages, session) {
       await fs.mkdir(path.dirname(fullPath), { recursive: true });
       await fs.writeFile(fullPath, content, 'utf8');
     }
+
+    // Remove Pixabay images that aren't referenced in any page before copying.
+    await cleanupUnusedImages(slug, pages);
 
     const uploadsDir = path.join(projectDir(slug), 'uploads');
     const exportAssetsDir = path.join(exportDir, 'assets');

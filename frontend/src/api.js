@@ -103,7 +103,7 @@ export const api = {
 // Streaming chat: calls onDelta(chunk) and resolves with full text on done.
 // Calls onJobId(jobId) as soon as the server assigns a job — use it to poll
 // if the connection drops before the 'done' event arrives.
-export async function streamChat({ model, messages, context, onDelta, onJobId, signal }) {
+export async function streamChat({ model, messages, context, onDelta, onJobId, onPreparingImages, signal }) {
   const res = await fetch(API + '/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -138,6 +138,8 @@ export async function streamChat({ model, messages, context, onDelta, onJobId, s
       if (event === 'jobId') {
         jobId = parsed.jobId;
         onJobId?.(jobId);
+      } else if (event === 'preparingImages') {
+        onPreparingImages?.(parsed);
       } else if (event === 'delta') {
         fullText += parsed.delta;
         onDelta?.(parsed.delta, fullText);

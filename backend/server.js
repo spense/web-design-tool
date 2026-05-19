@@ -16,6 +16,7 @@ import importRouter from './routes/import.js';
 import appStateRouter from './routes/appState.js';
 import uploadsRouter from './routes/uploads.js';
 import faviconRouter from './routes/favicon.js';
+import pixabayRouter from './routes/pixabay.js';
 import { ensureProjectsDir } from './storage.js';
 
 const app = express();
@@ -25,6 +26,7 @@ app.use(express.json({ limit: '50mb' }));
 app.get('/api/config', (req, res) => {
   res.json({
     hasApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
+    hasPixabayKey: Boolean(process.env.PIXABAY_API_KEY),
   });
 });
 
@@ -38,6 +40,7 @@ app.use('/api/crawl', crawlRouter);
 app.use('/api/export', exportRouter);
 app.use('/api/import', importRouter);
 app.use('/api/app-state', appStateRouter);
+app.use('/api/pixabay', pixabayRouter);
 
 app.use((err, req, res, next) => {
   console.error(err);
