@@ -299,7 +299,9 @@ The "trigger" is the button that opens a hidden menu (a hamburger, an "X", a cus
 
 3. *The toggle must work in pure HTML/CSS* — checkbox + label pattern, no JavaScript. The checkbox is visually hidden; the label IS the trigger button.
 
-4. *The trigger and the opened menu must not break the header.*
+4. *DOM structure: the checkbox and the element containing the menu must be siblings* so that \`#id:checked ~ .target\` selectors work. The most reliable pattern is to place the \`<input>\`, the \`<header>\` (containing the label trigger), and the menu element as adjacent siblings under a shared parent. Then target through the sibling: \`#menu-toggle:checked ~ header .menu-btn\`, \`#menu-toggle:checked ~ .mobile-nav\`, etc. If the menu lives *inside* the header, use \`#menu-toggle:checked ~ .site-header .mobile-nav\` — the \`~\` combinator only matches siblings, never descendants of siblings, so the selector path must account for the actual nesting. Getting this wrong is the #1 cause of non-functional mobile menus.
+
+5. *The trigger and the opened menu must not break the header.*
    - The trigger sits within the header's normal layout — aligned with the logo and other header content, not floating in arbitrary whitespace.
    - When the menu opens, it renders as its own positioned surface (dropdown, drawer, overlay, full-screen takeover — your call based on the design's character). It does not insert nav items inline among the header's existing children.
 
