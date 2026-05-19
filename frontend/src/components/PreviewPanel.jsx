@@ -9,7 +9,7 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed }) {
   const [viewport, setViewport] = useState('desktop');
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -169,15 +169,6 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     return () => iframe.removeEventListener('load', apply);
   }, [scrollAnimations, displayHtml]);
 
-  const [copied, setCopied] = useState(false);
-  const copyHtml = async () => {
-    try {
-      await navigator.clipboard.writeText(html);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {}
-  };
-
   const openFullScreen = () => {
     if (!html) return;
     const blob = new Blob([html], { type: 'text/html' });
@@ -191,6 +182,23 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     <div className="preview-panel">
       <div className="preview-toolbar">
         <div className="left">
+          <button
+            type="button"
+            className="chat-collapse-toggle"
+            onClick={onToggleChatCollapsed}
+            title={chatCollapsed ? 'Expand chat sidebar' : 'Collapse chat sidebar'}
+            aria-label={chatCollapsed ? 'Expand chat sidebar' : 'Collapse chat sidebar'}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.25" />
+              <line x1="6" y1="3.5" x2="6" y2="12.5" stroke="currentColor" strokeWidth="1.25" />
+              {chatCollapsed ? (
+                <path d="M9 6.5L10.5 8L9 9.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+              ) : (
+                <path d="M10.5 6.5L9 8L10.5 9.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+              )}
+            </svg>
+          </button>
           {pageNames.length > 1 && (
             <div className="page-dropdown" ref={pageDropdownRef}>
               <button className="with-caret" onClick={() => setPageMenuOpen(o => !o)}>
@@ -247,7 +255,6 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
         </div>
         <div className="right">
           <button onClick={openFullScreen} disabled={!html} title="Open in new browser tab">Full screen ↗</button>
-          <button onClick={copyHtml} disabled={!html}>{copied ? 'Copied!' : 'Copy HTML'}</button>
           <button className="primary" onClick={onExport} disabled={!html || exporting}>
             {exporting ? <><Spinner /> Exporting…</> : 'Export'}
           </button>

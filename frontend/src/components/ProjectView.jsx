@@ -14,6 +14,7 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
   const [activePage, setActivePage] = useState('index.html');
   const [exportResult, setExportResult] = useState(null);
   const [exporting, setExporting] = useState(false);
+  const [chatCollapsed, setChatCollapsed] = useState(false);
   const autoFaviconRef = useRef(new Set());
 
   useEffect(() => {
@@ -182,16 +183,18 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
   if (!data) return <div className="preview-empty">Project not found.</div>;
 
   return (
-    <div className="project-view">
-      <ChatPanel
-        project={data.project}
-        pages={data.pages}
-        messages={data.session.messages || []}
-        activePage={activePage}
-        onUpdate={updatePages}
-        hasApiKey={hasApiKey}
-        onStreamingChange={onStreamingChange}
-      />
+    <div className={`project-view${chatCollapsed ? ' chat-collapsed' : ''}`}>
+      {!chatCollapsed && (
+        <ChatPanel
+          project={data.project}
+          pages={data.pages}
+          messages={data.session.messages || []}
+          activePage={activePage}
+          onUpdate={updatePages}
+          hasApiKey={hasApiKey}
+          onStreamingChange={onStreamingChange}
+        />
+      )}
       <PreviewPanel
         slug={tab.slug}
         pages={data.pages}
@@ -206,6 +209,8 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
         onFaviconChange={handleFaviconChange}
         scrollAnimations={data.project.scrollAnimations !== false}
         onScrollAnimationsChange={handleScrollAnimationsChange}
+        chatCollapsed={chatCollapsed}
+        onToggleChatCollapsed={() => setChatCollapsed(c => !c)}
       />
       {exportResult && (
         <ExportModal

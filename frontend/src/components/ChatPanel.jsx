@@ -216,15 +216,22 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     abortRef.current?.abort();
     abortRef.current = null;
     if (project?.slug) localStorage.removeItem(`gen:${project.slug}`);
+    const elapsedSecs = streamStartRef.current ? Math.floor((Date.now() - streamStartRef.current) / 1000) : null;
     streamStartRef.current = null;
     jobIdRef.current = null;
     setStreaming(false);
     setStreamingText('');
-    if (preSendMessagesRef.current) {
-      onUpdate(undefined, preSendMessagesRef.current, preSendProjectRef.current);
-      preSendMessagesRef.current = null;
-      preSendProjectRef.current = null;
-    }
+    const stoppedMsg = {
+      role: 'assistant',
+      kind: 'stopped',
+      content: 'Response stopped by user',
+      model,
+      timestamp: new Date().toISOString(),
+      duration: elapsedSecs,
+    };
+    onUpdate(undefined, [...messages, stoppedMsg], project);
+    preSendMessagesRef.current = null;
+    preSendProjectRef.current = null;
   };
 
   const handleAttach = async (e) => {
@@ -593,7 +600,7 @@ function Message({ msg }) {
         {msg.role}{msg.model ? ` · ${MODEL_LABELS[msg.model] || msg.model}` : ''}
         {msg.duration != null ? ` (${formatDuration(msg.duration)})` : ''}
       </div>
-      <div className="body">{msg.content}</div>
+      <div className={`body${msg.kind === 'stopped' ? ' stopped' : ''}`}>{msg.content}</div>
       {msg.files?.length > 0 && (
         <div className="crawl-info">Updated: {msg.files.join(', ')}</div>
       )}
