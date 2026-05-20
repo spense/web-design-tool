@@ -144,7 +144,7 @@ export async function streamChat({ model, messages, context, onDelta, onJobId, o
         fullText += parsed.delta;
         onDelta?.(parsed.delta, fullText);
       } else if (event === 'done') {
-        return { text: parsed.text || fullText, usage: parsed.usage || null, stopReason: parsed.stopReason || null };
+        return { text: parsed.text || fullText, usage: parsed.usage || null, stopReason: parsed.stopReason || null, imageStats: parsed.imageStats || null };
       } else if (event === 'error') {
         throw new Error(parsed.error || 'Stream error');
       }

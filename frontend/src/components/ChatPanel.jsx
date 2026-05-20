@@ -25,7 +25,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [crawling, setCrawling] = useState(false);
-  const [preparingImages, setPreparingImages] = useState(false);
+  const [imagePoolStatus, setImagePoolStatus] = useState(null); // null | { status: 'searching' } | { status: 'ready', poolSize }
   const [attachments, setAttachments] = useState([]);
   const messagesRef = useRef(null);
   const panelRef = useRef(null);
@@ -158,6 +158,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       files: appliedSummary,
       usage,
       duration: elapsedSecs,
+      imageStats: result.imageStats || null,
     };
     const finalMessages = [...baseMessages, assistantMsg, ...failureMessages];
     const finalProject = {
@@ -168,6 +169,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     onUpdate(updatedPages, finalMessages, finalProject);
     setStreaming(false);
     setStreamingText('');
+    setImagePoolStatus(null);
   }, [pages, onUpdate]);
 
   // Keep a ref so the reconnect effect always calls the latest version.
@@ -294,8 +296,8 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   }, [messages, streamingText, crawling]);
 
   useEffect(() => {
-    onStreamingChangeRef.current?.(streaming || crawling || preparingImages);
-  }, [streaming, crawling, preparingImages]);
+    onStreamingChangeRef.current?.(streaming || crawling || !!imagePoolStatus);
+  }, [streaming, crawling, imagePoolStatus]);
 
   useEffect(() => {
     return () => { onStreamingChangeRef.current?.(false); };
@@ -392,8 +394,8 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           activePage,
           currentPages: pages,
         },
-        onDelta: (_d, full) => { setPreparingImages(false); setStreamingText(full); },
-        onPreparingImages: () => setPreparingImages(true),
+        onDelta: (_d, full) => setStreamingText(full),
+        onPreparingImages: (data) => setImagePoolStatus(data),
         onJobId: (jid) => {
           jobIdRef.current = jid;
           localStorage.setItem(storageKey, JSON.stringify({
@@ -407,7 +409,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     } catch (e) {
       if (e.name === 'AbortError' || abortRef.current?.signal.aborted) {
         localStorage.removeItem(storageKey);
-        setPreparingImages(false);
+        setImagePoolStatus(null);
         return;
       }
       // Stream dropped — fall back to polling if we have a jobId.
@@ -421,7 +423,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           const errMsg = { role: 'system', content: `Error: ${pollErr.message}`, timestamp: new Date().toISOString() };
           onUpdate(undefined, [...newMessages, errMsg], updatedProject);
           setStreaming(false);
-          setPreparingImages(false);
+          setImagePoolStatus(null);
           setStreamingText('');
           return;
         }
@@ -430,7 +432,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
         const errMsg = { role: 'system', content: `Error: ${e.message}`, timestamp: new Date().toISOString() };
         onUpdate(undefined, [...newMessages, errMsg], updatedProject);
         setStreaming(false);
-        setPreparingImages(false);
+        setImagePoolStatus(null);
         setStreamingText('');
         return;
       }
@@ -458,20 +460,20 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   return (
     <div className="chat-panel" ref={panelRef}>
       <div className="chat-messages" ref={messagesRef}>
-        {messages.length === 0 && !streaming && !crawling && !preparingImages && (
+        {messages.length === 0 && !streaming && !crawling && !imagePoolStatus && (
           <div className="chat-empty">
             Paste a URL to crawl, or describe the site you want to design.
           </div>
         )}
         {messages.map((m, i) => <Message key={i} msg={m} />)}
         {crawling && <div className="chat-msg system"><div className="body">Crawling…</div></div>}
-        {preparingImages && <div className="chat-msg system"><div className="body">Preparing images…</div></div>}
-        {streaming && (
+        {(streaming || imagePoolStatus) && (
           <StreamingMessage
             text={streamingText}
             model={model}
             isUpdate={Object.keys(pages || {}).length > 0}
             startedAt={streamStartRef.current}
+            imagePoolStatus={imagePoolStatus}
           />
         )}
       </div>
@@ -554,7 +556,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   );
 }
 
-function StreamingMessage({ text, model, isUpdate, startedAt }) {
+function StreamingMessage({ text, model, isUpdate, startedAt, imagePoolStatus }) {
   const [elapsed, setElapsed] = useState(
     startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0
   );
@@ -567,19 +569,32 @@ function StreamingMessage({ text, model, isUpdate, startedAt }) {
     return () => clearInterval(iv);
   }, [startedAt]);
 
+  const isStreaming = text.length > 0;
   const editIdx = editStartIndex(text);
   let label;
   if (editIdx !== -1) label = 'Applying edits';
   else if (isUpdate) label = 'Updating design';
   else label = 'Generating design';
 
+  let imagePoolLabel = null;
+  if (imagePoolStatus?.status === 'searching') {
+    imagePoolLabel = <><Spinner /> Preparing images…</>;
+  } else if (imagePoolStatus?.status === 'ready') {
+    imagePoolLabel = `Image pool ready: ${imagePoolStatus.poolSize} images`;
+  }
+
   return (
     <div className="chat-msg assistant">
       <div className="who">assistant · {MODEL_LABELS[model] || model}</div>
       <div className="body">
-        <span className="gen-status" style={{ display: 'flex' }}>
-          <Spinner /> {label}… ({formatDuration(elapsed)})
-        </span>
+        {isStreaming && (
+          <span className="gen-status" style={{ display: 'flex' }}>
+            <Spinner /> {label}… ({formatDuration(elapsed)})
+          </span>
+        )}
+        {imagePoolLabel && (
+          <div className="crawl-info" style={{ marginTop: isStreaming ? 4 : 0 }}>{imagePoolLabel}</div>
+        )}
       </div>
     </div>
   );
@@ -606,6 +621,9 @@ function Message({ msg }) {
       <div className={`body${msg.kind === 'stopped' ? ' stopped' : ''}`}>{msg.content}</div>
       {msg.files?.length > 0 && (
         <div className="crawl-info">Updated: {msg.files.join(', ')}</div>
+      )}
+      {msg.imageStats && (
+        <div className="crawl-info">Used {msg.imageStats.used} image{msg.imageStats.used !== 1 ? 's' : ''}. Discarded {msg.imageStats.discarded} unused image{msg.imageStats.discarded !== 1 ? 's' : ''}.</div>
       )}
       {msg.usage && (
         <div className="crawl-info" style={{ borderLeftColor: 'var(--text-faint)' }}>

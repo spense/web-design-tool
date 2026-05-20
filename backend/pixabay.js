@@ -67,7 +67,10 @@ export async function downloadToProject(slug, imageUrl, filename) {
   return { filename, sizeBytes: buffer.length };
 }
 
-export async function extractSearchTerms(crawledData, userPrompt) {
+// Decide whether the user prompt warrants a NEW Pixabay image search (not just
+// rearranging existing images) and, if so, extract search terms in one call.
+// Returns { needsImages: boolean, terms: string[] }.
+export async function evaluateImageIntent(crawledData, userPrompt) {
   const parts = [];
   if (crawledData) {
     if (crawledData.title) parts.push(`Business: ${crawledData.title}`);
@@ -77,30 +80,56 @@ export async function extractSearchTerms(crawledData, userPrompt) {
   }
   if (userPrompt) parts.push(`User request: ${userPrompt}`);
   const context = parts.join('\n');
-  if (!context.trim()) return ['business', 'professional', 'modern'];
+  if (!context.trim()) return { needsImages: false, terms: [] };
 
   try {
     const client = getAnthropic();
     const msg = await client.messages.create({
       model: MODELS.haiku,
-      max_tokens: 200,
-      system: 'Extract 5-8 Pixabay image search terms from the business context below. Return ONLY a JSON array of strings. Focus on: business type imagery, services offered, atmosphere, textures, and backgrounds that would suit the website. Example: ["bakery storefront", "fresh bread close-up", "pastry display", "cozy cafe interior", "flour texture", "wooden table"]',
+      max_tokens: 250,
+      system: `You decide whether a user's web-design prompt requires NEW stock images to be searched and downloaded from Pixabay.
+
+Answer YES when the user is asking for new/different visual content — e.g. "add a photo of...", "search for an image of...", "find pictures of...", "use a background image of...", "I need images of...", "replace the photo with something showing...".
+
+Answer NO when the user is only making layout/style changes to existing content — e.g. "move the image below the text", "make the hero bigger", "remove the gallery", "change the background color", "resize the photo", "center the image", "fix the spacing".
+
+Return ONLY a JSON object:
+- If YES: {"needsImages": true, "terms": ["search term 1", "search term 2", ...]} with 5-8 Pixabay search terms focused on the business type, services, atmosphere, and requested imagery.
+- If NO: {"needsImages": false}`,
       messages: [{ role: 'user', content: context }],
     });
     const text = msg.content?.[0]?.text || '';
-    const match = text.match(/\[[\s\S]*\]/);
+    const match = text.match(/\{[\s\S]*\}/);
     if (match) {
-      const terms = JSON.parse(match[0]);
-      if (Array.isArray(terms) && terms.length > 0) {
-        console.log(`[pixabay] extracted ${terms.length} search terms via Haiku`);
-        return terms.slice(0, 8);
+      const result = JSON.parse(match[0]);
+      if (result.needsImages && Array.isArray(result.terms) && result.terms.length > 0) {
+        console.log(`[pixabay] Haiku: needs images, ${result.terms.length} search terms`);
+        return { needsImages: true, terms: result.terms.slice(0, 8) };
       }
+      console.log(`[pixabay] Haiku: no new images needed`);
+      return { needsImages: false, terms: [] };
     }
   } catch (err) {
-    console.error('[pixabay] Haiku term extraction failed, using fallback:', err.message);
+    console.error('[pixabay] Haiku intent check failed, skipping search:', err.message);
   }
 
-  const words = context.toLowerCase().match(/\b[a-z]{3,}\b/g) || [];
+  return { needsImages: false, terms: [] };
+}
+
+// Legacy wrapper for first-generation (always needs images, just extract terms).
+export async function extractSearchTerms(crawledData, userPrompt) {
+  const result = await evaluateImageIntent(crawledData, userPrompt);
+  if (result.needsImages && result.terms.length > 0) return result.terms;
+
+  // Fallback: basic keyword extraction for first-generation where we always need terms.
+  const parts = [];
+  if (crawledData) {
+    if (crawledData.title) parts.push(crawledData.title);
+    if (crawledData.description) parts.push(crawledData.description);
+  }
+  if (userPrompt) parts.push(userPrompt);
+  const text = parts.join(' ');
+  const words = text.toLowerCase().match(/\b[a-z]{3,}\b/g) || [];
   const unique = [...new Set(words)].filter(w => !['the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'make', 'website', 'site', 'page', 'new', 'use', 'create'].includes(w));
   return unique.slice(0, 5);
 }
@@ -155,7 +184,7 @@ export function formatPoolForPrompt(pool) {
   const lines = pool.map(img =>
     `- ${img.path} — ${img.description} (${img.width}x${img.height})`
   );
-  return `\n\n--- IMAGE POOL ---\nThe following images have been downloaded and are available for use in the design.\nReference them by their exact path as <img src="uploads/pb-..."> or background-image: url(uploads/pb-...).\nUse inline <img> for content images (team photos, gallery items, service illustrations) and CSS background-image for atmospheric/decorative use (hero backgrounds, section textures, overlays).\nPick images that best match each section's content and purpose.\n\n${lines.join('\n')}\n`;
+  return `\n\n--- IMAGE POOL ---\nThe following images have been downloaded and are available for use in the design.\nReference them by their exact path as <img src="uploads/pb-..."> or background-image: url(uploads/pb-...).\nUse inline <img> for content images (team photos, gallery items, service illustrations) and CSS background-image for atmospheric/decorative use (hero backgrounds, section textures, overlays).\nPick images that best match each section's content and purpose.\nIMPORTANT: When the user asks you to use, add, or change an image, just pick the best-fit option from this pool and apply it immediately in code. Do NOT ask the user to choose between options or confirm your selection — make the call yourself. The user will tell you if they want something different.\n\n${lines.join('\n')}\n`;
 }
 
 export async function cleanupUnusedImages(slug, pages) {

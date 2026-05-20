@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, pickRandomArchetype, detectArchetypeInPrompt } from '../anthropic.js';
 import { detectMissingPages, extractPlannedPages, parseFileBlocks } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions } from '../parsePatch.js';
-import { extractSearchTerms, buildImagePool, formatPoolForPrompt, cleanupUnusedImages, listExistingPool } from '../pixabay.js';
+import { extractSearchTerms, evaluateImageIntent, buildImagePool, formatPoolForPrompt, cleanupUnusedImages, listExistingPool } from '../pixabay.js';
 
 const router = Router();
 
@@ -21,7 +21,8 @@ router.get('/:jobId', (req, res) => {
 router.post('/', async (req, res, next) => {
   try {
     const { model, messages, context } = req.body || {};
-    console.log(`[chat] POST received — model=${model} messages=${messages?.length} hasContext=${!!context} hasCrawledData=${!!context?.crawledData} hasCurrentPages=${!!context?.currentPages}`);
+    const currentPageCount = context?.currentPages ? Object.keys(context.currentPages).length : 0;
+    console.log(`[chat] POST received — model=${model} messages=${messages?.length} hasContext=${!!context} hasCrawledData=${!!context?.crawledData} currentPages=${currentPageCount}`);
     const client = getAnthropic();
     const resolvedModel = resolveModel(model);
     const jobId = randomUUID();
@@ -89,21 +90,47 @@ router.post('/', async (req, res, next) => {
           lastUserText = lastUserMsg.content.filter(b => b.type === 'text').map(b => b.text).join(' ');
           hasAttachments = lastUserText.includes('user has attached');
         }
-        const imageKeywords = !hasAttachments && /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|unsplash|pixabay)\b/i.test(lastUserText);
 
         const existing = isFirstGeneration ? [] : await listExistingPool(context.slug);
-        const needsNewImages = isFirstGeneration || imageKeywords;
 
-        if (needsNewImages) {
+        // For first generation, always search. For subsequent prompts, use a
+        // two-stage filter: a cheap regex pre-filter catches image-adjacent
+        // words, then Haiku makes the smart YES/NO call on whether the user
+        // actually wants NEW images (vs layout changes like "move the image").
+        // Skip entirely when user has attachments (their own images).
+        const maybeAboutImages = !hasAttachments && /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|unsplash|pixabay)\b/i.test(lastUserText);
+        let needsNewImages = false;
+
+        if (isFirstGeneration) {
+          needsNewImages = true;
           safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
-          const searchTerms = await extractSearchTerms(context.crawledData, userText);
+          const searchTerms = await extractSearchTerms(context.crawledData, lastUserText);
           console.log(`[chat] pixabay search terms: ${searchTerms.join(', ')}`);
           const pool = await buildImagePool(context.slug, searchTerms);
-          const combined = [...existing, ...pool.filter(p => !existing.some(e => e.path === p.path))];
-          if (combined.length > 0) {
-            dynamicSystem += formatPoolForPrompt(combined);
+          if (pool.length > 0) {
+            dynamicSystem += formatPoolForPrompt(pool);
+            safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'ready', poolSize: pool.length })}\n\n`);
           }
-        } else if (existing.length > 0) {
+        } else if (maybeAboutImages) {
+          // Regex matched — ask Haiku whether this is actually a request for
+          // NEW images or just a layout change involving existing ones.
+          const intent = await evaluateImageIntent(context.crawledData, lastUserText);
+          needsNewImages = intent.needsImages;
+          if (needsNewImages && intent.terms.length > 0) {
+            safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
+            console.log(`[chat] pixabay search terms (intent): ${intent.terms.join(', ')}`);
+            const pool = await buildImagePool(context.slug, intent.terms);
+            const combined = [...existing, ...pool.filter(p => !existing.some(e => e.path === p.path))];
+            if (combined.length > 0) {
+              dynamicSystem += formatPoolForPrompt(combined);
+              safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'ready', poolSize: combined.length })}\n\n`);
+            }
+          }
+        }
+
+        // Always inject existing pool so the model knows what images are
+        // available, even when we're not searching for new ones.
+        if (!needsNewImages && existing.length > 0) {
           dynamicSystem += formatPoolForPrompt(existing);
         }
       } catch (err) {
@@ -238,20 +265,32 @@ router.post('/', async (req, res, next) => {
       }
 
       // Clean up unused Pixabay images after generation.
+      // Only run cleanup and report stats when the model actually emitted code
+      // changes (FILE/PATCH/REGION blocks). Prose-only responses shouldn't
+      // trigger cleanup or show misleading "Used X images" stats.
+      let imageStats = null;
       if (process.env.PIXABAY_API_KEY && context?.slug) {
         try {
           const currentPages = context?.currentPages || {};
           const { files: newFiles } = parseFileBlocks(job.fullText);
           const regions = parseRegionBlocks(job.fullText);
-          let mergedPages = { ...currentPages, ...newFiles };
-          if (regions.length > 0) {
-            mergedPages = applyRegions(mergedPages, regions).updatedPages;
-          }
           const { edits } = parsePatchBlocks(job.fullText);
-          if (Object.keys(edits).length > 0) {
-            mergedPages = applyPatches(mergedPages, edits).updatedPages;
+          const hasCodeChanges = Object.keys(newFiles).length > 0 || regions.length > 0 || Object.keys(edits).length > 0;
+
+          if (hasCodeChanges) {
+            let mergedPages = { ...currentPages, ...newFiles };
+            if (regions.length > 0) {
+              mergedPages = applyRegions(mergedPages, regions).updatedPages;
+            }
+            if (Object.keys(edits).length > 0) {
+              mergedPages = applyPatches(mergedPages, edits).updatedPages;
+            }
+            const deleted = await cleanupUnusedImages(context.slug, mergedPages);
+            const remaining = await listExistingPool(context.slug);
+            if (remaining.length > 0 || deleted.length > 0) {
+              imageStats = { used: remaining.length, discarded: deleted.length };
+            }
           }
-          await cleanupUnusedImages(context.slug, mergedPages);
         } catch (err) {
           console.error('[chat] pixabay cleanup failed:', err.message);
         }
@@ -262,6 +301,7 @@ router.post('/', async (req, res, next) => {
         stopReason: lastStopReason,
         usage: aggregateUsage,
         partsCount,
+        imageStats,
       };
       console.log(`[chat] model=${resolvedModel} parts=${partsCount} stop=${stats.stopReason} in=${stats.usage.input_tokens} out=${stats.usage.output_tokens} cache_write=${stats.usage.cache_creation_input_tokens} cache_read=${stats.usage.cache_read_input_tokens}`);
       job.status = 'done';
