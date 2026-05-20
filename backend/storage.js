@@ -84,7 +84,7 @@ export async function createProject({ name }) {
   return { project, pages: {}, session: { messages: [] } };
 }
 
-export async function saveProject(slug, { project, pages, session }) {
+export async function saveProject(slug, { project, pages, session, skipHistory }) {
   const dir = projectDir(slug);
   const now = new Date().toISOString();
   if (project) {
@@ -106,7 +106,7 @@ export async function saveProject(slug, { project, pages, session }) {
     await writeJson(path.join(dir, 'pages.json'), pages);
   }
   if (session) await writeJson(path.join(dir, 'session.json'), session);
-  if (pagesChanged) {
+  if (pagesChanged && !skipHistory) {
     await writeJson(path.join(dir, 'history', `${now.replace(/[:.]/g, '-')}.json`), {
       timestamp: now,
       pages,

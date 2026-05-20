@@ -28,7 +28,10 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
         if (cancelled) return;
         setData(d);
         setHistory(h);
-        setHistoryIndex(h.length - 1);
+        // Restore position from project metadata if the user was mid-undo before refresh.
+        const saved = d.project.historyPosition;
+        const restoredIdx = saved ? h.indexOf(saved) : -1;
+        setHistoryIndex(restoredIdx >= 0 ? restoredIdx : h.length - 1);
         const firstPage = Object.keys(d.pages || {})[0];
         if (firstPage) setActivePage(firstPage);
       })
@@ -42,6 +45,10 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
   }, [history, historyIndex]);
 
   const persist = useCallback(async (next, { skipHistory } = {}) => {
+    // New changes move us to the latest — clear any saved undo position.
+    if (next.project?.historyPosition !== undefined) {
+      next = { ...next, project: { ...next.project, historyPosition: undefined } };
+    }
     setData(next);
     if (skipHistory) return;
     try {
@@ -102,11 +109,16 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     try {
       const entry = await api.getHistoryEntry(tab.slug, history[targetIndex]);
       if (entry?.pages) {
-        setData(d => d ? { ...d, pages: entry.pages } : d);
+        const nextProject = { ...data.project, historyPosition: history[targetIndex] };
+        const next = { ...data, pages: entry.pages, project: nextProject };
+        setData(next);
         setHistoryIndex(targetIndex);
+        // Persist to disk so refreshes and exports reflect the undo,
+        // but skip history creation — we're navigating existing entries.
+        await api.saveProject(tab.slug, { ...next, skipHistory: true });
       }
     } catch (e) { console.error('undo failed', e); }
-  }, [tab.slug, history, historyIndex]);
+  }, [tab.slug, history, historyIndex, data]);
 
   const handleRedo = useCallback(async () => {
     if (historyIndex >= history.length - 1) return;
@@ -114,11 +126,18 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     try {
       const entry = await api.getHistoryEntry(tab.slug, history[targetIndex]);
       if (entry?.pages) {
-        setData(d => d ? { ...d, pages: entry.pages } : d);
+        // At the latest entry, clear the position so future loads default to latest.
+        const atLatest = targetIndex === history.length - 1;
+        const nextProject = atLatest
+          ? { ...data.project, historyPosition: undefined }
+          : { ...data.project, historyPosition: history[targetIndex] };
+        const next = { ...data, pages: entry.pages, project: nextProject };
+        setData(next);
         setHistoryIndex(targetIndex);
+        await api.saveProject(tab.slug, { ...next, skipHistory: true });
       }
     } catch (e) { console.error('redo failed', e); }
-  }, [tab.slug, history, historyIndex]);
+  }, [tab.slug, history, historyIndex, data]);
 
   // Auto-generate a monogram favicon the first time this project has pages.
   // Skipped on every subsequent design revision — the user regenerates manually.
