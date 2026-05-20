@@ -80,11 +80,16 @@ router.post('/', async (req, res, next) => {
     // Pixabay image pool: search and download before generation starts.
     if (process.env.PIXABAY_API_KEY && context?.slug) {
       try {
-        const userText = (messages || [])
-          .filter(m => m.role === 'user')
-          .map(m => typeof m.content === 'string' ? m.content : '')
-          .join(' ');
-        const imageKeywords = /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|unsplash|pixabay)\b/i.test(userText);
+        const lastUserMsg = [...(messages || [])].reverse().find(m => m.role === 'user');
+        let lastUserText = '';
+        let hasAttachments = false;
+        if (typeof lastUserMsg?.content === 'string') {
+          lastUserText = lastUserMsg.content;
+        } else if (Array.isArray(lastUserMsg?.content)) {
+          lastUserText = lastUserMsg.content.filter(b => b.type === 'text').map(b => b.text).join(' ');
+          hasAttachments = lastUserText.includes('user has attached');
+        }
+        const imageKeywords = !hasAttachments && /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|unsplash|pixabay)\b/i.test(lastUserText);
 
         const existing = isFirstGeneration ? [] : await listExistingPool(context.slug);
         const needsNewImages = isFirstGeneration || imageKeywords;
