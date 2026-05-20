@@ -80,18 +80,17 @@ router.post('/', async (req, res, next) => {
     // Pixabay image pool: search and download before generation starts.
     if (process.env.PIXABAY_API_KEY && context?.slug) {
       try {
-        safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
         const userText = (messages || [])
           .filter(m => m.role === 'user')
           .map(m => typeof m.content === 'string' ? m.content : '')
           .join(' ');
+        const imageKeywords = /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|unsplash|pixabay)\b/i.test(userText);
 
         const existing = isFirstGeneration ? [] : await listExistingPool(context.slug);
-        const needsNewImages = isFirstGeneration
-          || existing.length === 0
-          || /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|unsplash|pixabay)\b/i.test(userText);
+        const needsNewImages = isFirstGeneration || imageKeywords;
 
         if (needsNewImages) {
+          safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
           const searchTerms = await extractSearchTerms(context.crawledData, userText);
           console.log(`[chat] pixabay search terms: ${searchTerms.join(', ')}`);
           const pool = await buildImagePool(context.slug, searchTerms);
@@ -99,10 +98,8 @@ router.post('/', async (req, res, next) => {
           if (combined.length > 0) {
             dynamicSystem += formatPoolForPrompt(combined);
           }
-        } else {
-          if (existing.length > 0) {
-            dynamicSystem += formatPoolForPrompt(existing);
-          }
+        } else if (existing.length > 0) {
+          dynamicSystem += formatPoolForPrompt(existing);
         }
       } catch (err) {
         console.error('[chat] pixabay image pool failed, continuing without:', err.message);

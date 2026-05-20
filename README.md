@@ -4,7 +4,7 @@ Local-only AI design tool for generating and iterating on small-business website
 
 ## Setup
 
-1. `cp .env.example .env` and add `ANTHROPIC_API_KEY` (https://console.anthropic.com/settings/keys)
+1. `cp .env.example .env` and add `ANTHROPIC_API_KEY` (https://console.anthropic.com/settings/keys) and optionally `PIXABAY_API_KEY` (https://pixabay.com/api/docs/ — free)
 2. `npm run install:all`
 3. `npm start` — runs backend (Express, port 3001) and frontend (Vite, port 5173) concurrently
 
@@ -31,13 +31,15 @@ Frontend is a single SPA. Each "tab" is a project. Generated HTML is rendered in
 - `storage.js` — filesystem CRUD for projects (read/write/list/rename/delete).
 - `crawler.js` — fetches a competitor URL with cheerio, extracts title/meta/headings/links/colors as intake data.
 - `parseFiles.js` — server-side parser for `<!-- FILE: -->` blocks (mirrored on frontend).
+- `pixabay.js` — Pixabay API client: search, download, term extraction (via Haiku), pool building, and cleanup of unused images.
 - `routes/`:
   - `projects.js` — CRUD: list, get, create, rename, delete, save.
-  - `chat.js` — streaming SSE endpoint (the main one).
+  - `chat.js` — streaming SSE endpoint (the main one). Pre-generation Pixabay image search and post-generation cleanup integrated here.
   - `crawl.js` — POST a URL, returns structured intake data.
-  - `export.js` — extracts CSS into external stylesheets, copies assets/favicons, writes the export bundle to disk. No API call — purely local.
+  - `export.js` — extracts CSS into external stylesheets, copies assets/favicons, writes the export bundle to disk. Cleans up unused Pixabay images before copying. No API call — purely local.
   - `import.js` — accepts a zip, creates a project from it (backend kept as reference; UI removed).
   - `uploads.js` — image upload + serve (sanitized filenames, suffix collision avoidance).
+  - `pixabay.js` — proxy routes for Pixabay search and download (keeps API key server-side; scaffolded for future image tooltip feature).
   - `appState.js` — persists open tabs / active tab in `app-state.json`.
 
 ### Frontend
@@ -71,7 +73,7 @@ project.json         metadata: name, slug, created, modified, crawledUrl,
 pages.json           { "index.html": "<!DOCTYPE...>", "contact.html": "...", ... }
 session.json         { messages: [{role, content, timestamp}, ...] }
 history/             snapshot per save: {ISO-timestamp}.json holds pages + last message
-uploads/             user-attached images
+uploads/             user-attached images + Pixabay images (pb-* prefix)
 exports/             {timestamp}/ folders, each containing the export bundle + zip
 ```
 
@@ -103,7 +105,8 @@ The `SYSTEM_PROMPT` covers:
 - **Section backgrounds must use vars** — hero sections, CTA bands, footers, nav bars — no hardcoded hex/rgb for backgrounds. Dark sections on a light design must define dedicated tokens (e.g. `--color-surface-inverse`, `--color-text-inverse`) in `:root`. Without this, theme switching leaves hardcoded backgrounds unchanged while text color swaps, causing illegible combinations.
 - **Mobile responsiveness** — mobile-first CSS, breakpoints at 390/768/1024+, fluid images, 44px touch targets.
 - **Header/content alignment** — when the header uses the same `max-width` as content sections, horizontal padding must not misalign it. Either drop padding above the max-width breakpoint, or include it in the max-width calc.
-- **Visual rules** — inline CSS in `<style>` in `<head>`, no external deps except Google Fonts, `https://placehold.co/` for placeholders, real business copy (no lorem), inline single-color SVG icons (no emojis).
+- **Image sourcing** — Pixabay images replace `placehold.co` as the default. Before generation, Haiku extracts search terms from crawled data or the user prompt, Pixabay is searched, and ~25 images are downloaded to `uploads/` with a `pb-` prefix. The image pool is injected into the prompt context. After generation, unused `pb-*` files are cleaned up. Falls back to `placehold.co` when no Pixabay key is configured, the search fails, or the user explicitly requests placeholders. Images can be used as inline `<img>` or CSS `background-image`.
+- **Visual rules** — inline CSS in `<style>` in `<head>`, no external deps except Google Fonts, real business copy (no lorem), inline single-color SVG icons (no emojis).
 - **Section–nav linkage** — for single-page designs, every `<section>` must have an `id` and the nav must link to it. No orphan sections or dead nav links.
 - **Multi-page rules** — every linked page must be a complete document with the same nav/header/footer markup and same `:root` tokens; page-appropriate body content.
 - **Nav styles** — Style A: in-page anchors (`#services`) for single-page; Style B: bare filenames (`about.html`) for multi-page; Style C: hybrid when the user describes a mix.
@@ -114,13 +117,13 @@ The `SYSTEM_PROMPT` covers:
 
 ```
 POST /api/chat  (SSE)
-body: { model, messages, context: { crawledData, activePage, currentPages } }
+body: { model, messages, context: { slug, crawledData, activePage, currentPages } }
 ```
 
 The system prompt is split into **two blocks** to maximize prompt caching:
 
 1. **Cached** (`cache_control: ephemeral`): `SYSTEM_PROMPT` + `MULTI_PAGE_WORKFLOW` (first gen only) + crawled intake data. Stable for the life of a project.
-2. **Uncached (dynamic)**: random archetype injection (first gen only, see below) + active-page hint + every current file's full contents. Changes every turn.
+2. **Uncached (dynamic)**: Pixabay image pool (when available) + random archetype injection (first gen only, see below) + active-page hint + every current file's full contents. Changes every turn.
 
 **Random archetype injection**: on first generation, `chat.js` checks whether the user's message contains a recognized archetype slug. If not, it calls `pickRandomArchetype()` (exported from `anthropic.js`) to select a random archetype (with ~25% chance of a blend pair) and injects it into the dynamic system block. This gives the model a concrete structural starting point instead of defaulting to the same pattern. The injection also reminds the model to state its IA decisions and archetype choice in commentary. The selected archetype is logged: `[chat] injected random archetype: X`.
 
@@ -220,6 +223,52 @@ This is why the system prompt is so strict about "no hardcoded brand colors / fo
 
 ---
 
+## Pixabay image integration
+
+Replaces `placehold.co` placeholders with real stock photos from Pixabay. Requires `PIXABAY_API_KEY` in `.env` (free at https://pixabay.com/api/docs/). Degrades gracefully when absent — falls back to `placehold.co`.
+
+### How it works
+
+1. **Pre-generation search** (`chat.js`): Before the first `runTurn()`, if `PIXABAY_API_KEY` is set:
+   - A Haiku call extracts 5-8 search terms from crawled data and/or user prompt (~$0.001, ~1-2s)
+   - Pixabay API is searched for each term (3-5 parallel requests)
+   - Top ~25 unique images are downloaded to `projects/{slug}/uploads/` with a `pb-` prefix (e.g. `pb-bakery-interior-12345.jpg`)
+   - The image pool (paths + descriptions) is injected into the dynamic system prompt block
+
+2. **During generation**: The model picks contextually relevant images from the pool. Images can be used as inline `<img src="uploads/pb-...">` or CSS `background-image: url(uploads/pb-...)`.
+
+3. **Post-generation cleanup** (`chat.js` + `pixabay.js:cleanupUnusedImages`): Scans all page HTML for `pb-*` filenames. Deletes any unreferenced `pb-*` files from `uploads/`.
+
+4. **Export**: The existing `uploads/` → `assets/` pipeline handles Pixabay images automatically. A pre-export cleanup pass removes stale `pb-*` files.
+
+### When search triggers
+
+- **First generation**: Always searches (based on crawled data + user prompt)
+- **Subsequent prompts with image keywords** (`image`, `photo`, `picture`, `background`, `gallery`, `hero`, etc.): Searches with new terms, merges with existing pool
+- **Subsequent prompts without image keywords**: Injects existing `pb-*` pool into prompt (no API calls, no latency)
+- **No Pixabay key**: Skipped entirely, model uses `placehold.co`
+
+### Pixabay API constraints
+
+- **No hotlinking**: Images must be downloaded and self-hosted (URLs expire after 24h)
+- **No attribution required** on final sites
+- **Rate limit**: 100 requests per 60 seconds
+- **Media types**: Supports `photo` (default), `illustration`, and `video` via `options.type`
+
+### Key files
+
+- `backend/pixabay.js` — core module: `searchImages()`, `buildImagePool()`, `extractSearchTerms()`, `cleanupUnusedImages()`, `formatPoolForPrompt()`, `listExistingPool()`
+- `backend/routes/pixabay.js` — API proxy routes (`GET /api/pixabay/search`, `POST /api/pixabay/download`), scaffolded for future image tooltip feature
+- Integration points in `backend/routes/chat.js` (pre/post generation) and `backend/routes/export.js` (pre-export cleanup)
+
+### Frontend support
+
+- `PreviewPanel.jsx:rewriteUploadsUrls` handles both `src`/`href` attributes and CSS `url()` references for `uploads/` paths
+- `ChatPanel.jsx` shows a "Preparing images…" indicator (same style as "Crawling…") when a Pixabay search is running
+- `api.js:streamChat` handles the `preparingImages` SSE event from the backend
+
+---
+
 ## Crawler / intake
 
 `POST /api/crawl { url }` runs `backend/crawler.js`. Cheerio extracts title, meta description, text (8K chars max), headings, image URLs, nav links, and inline color hints (looks for `color:` / `background:` literals). The result becomes `project.crawledData` and is injected into the cached system block as `--- INTAKE DATA (crawled from {url}) ---`. The model uses it for real business copy, service lists, hours, etc.
@@ -228,7 +277,7 @@ This is why the system prompt is so strict about "no hardcoded brand colors / fo
 
 ## Export / import
 
-**Export** (`routes/export.js`): extracts inline CSS into external stylesheets, rewrites upload paths to `assets/`, injects critical animation CSS and favicon `<link>` tags, then writes the bundle to `exports/{timestamp}/`. No API call — purely local file operations.
+**Export** (`routes/export.js`): cleans up unused Pixabay images, extracts inline CSS into external stylesheets, rewrites upload paths to `assets/`, injects critical animation CSS and favicon `<link>` tags, then writes the bundle to `exports/{timestamp}/`. No API call — purely local file operations.
 
 **Import** (`routes/import.js`): accepts a zip via multipart form, creates a fresh project, populates `pages.json` from `.html` files in the zip. Backend route is kept as a reference; the UI import button has been removed (use clone instead).
 
@@ -239,10 +288,12 @@ This is why the system prompt is so strict about "no hardcoded brand colors / fo
 For reference, here's what happens on a chat send:
 
 1. User types in `ChatPanel`. Attachments encoded into structured `messages` content blocks (text + image/file references).
-2. `streamChat` POSTs to `/api/chat`. Backend builds split system blocks, opens an Anthropic stream.
-3. Frontend renders deltas live; HTML/EDIT markers are detected via `generationStartIndex` and the streaming view shows a "Generating design" spinner past that point.
-4. On `done`: parse PATCH blocks first (`parsePatchBlocks`), then FILE blocks (`parseFileBlocks`). Apply patches to `pages`, merge any complete FILE blocks. Reject incomplete files. Surface system messages for any failures or truncation.
-5. Persist updated `pages` + appended messages + `modelHistory` entry via `PUT /api/projects/{slug}`. Storage writes a history snapshot.
+2. `streamChat` POSTs to `/api/chat`. Backend builds split system blocks.
+3. If Pixabay is configured and a search is needed (first gen or image keywords in prompt): extract search terms via Haiku, search Pixabay, download images to `uploads/`, inject pool into prompt. A `preparingImages` SSE event triggers the "Preparing images…" indicator in the UI.
+4. Backend opens an Anthropic stream. Frontend renders a spinner during streaming (model prose commentary is hidden until the final message).
+5. On `done`: parse PATCH blocks first (`parsePatchBlocks`), then FILE blocks (`parseFileBlocks`). Apply patches to `pages`, merge any complete FILE blocks. Reject incomplete files. Surface system messages for any failures or truncation.
+6. Post-generation: cleanup unused `pb-*` images from `uploads/`.
+7. Persist updated `pages` + appended messages + `modelHistory` entry via `PUT /api/projects/{slug}`. Storage writes a history snapshot.
 
 ---
 

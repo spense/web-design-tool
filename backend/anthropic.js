@@ -234,8 +234,7 @@ Choose the archetype based on the business's goals, content strengths, and what 
 
 - Home page hero: Most sites will have a hero at the top of the home page, but it is best for you to determine this based on the archetype and improvements you suggest from the home page. When you create a hero, it must be engaging and creative. It can include things like heading text, sub heading text, background (image, pattern, or texture), inline image(s), CTA blocks, contact info, etc. Not all these are required. Use your judgement on how best to build out the hero content. Note: not all archetypes call for a traditional hero — some may skip or minimize it in favor of their primary structural pattern.
 - Section–nav linkage — CRITICAL for single-page designs: every \`<section>\` you create must have an \`id\` attribute, and the nav must include an anchor link to each section. If you build a section called "Services", the markup must be \`<section id="services">\` and the nav must contain \`<a href="#services">Services</a>\`. No orphan sections without nav links. No nav links without matching section IDs. Verify this before finalizing.
-- Contact form: Sites should always include a contact form, either in a "contact" section, or "contact" page.
-- Contact fields: At least include the basics - name, phone, email, message, submit. More may be required depending on the business type and context of the site (such as a services dropdown, location dropdown, address fields, etc.)
+- Contact form: Most sites should include a contact form (in a "contact" section or page), but use judgment. If the user's prompt or page list omits a contact page, or if the business's primary contact method is booking/scheduling (salons, spas, medical offices, etc.), a contact form may not be needed — a CTA linking to an external booking system or a simple phone/email block may be more appropriate. When you do include a contact form, include at least the basics: name, phone, email, message, submit. More fields may be appropriate depending on the business type (services dropdown, location dropdown, address fields, etc.).
 - Do NOT include any JavaScript form submission logic — no addEventListener('submit', ...), no fetch calls to form endpoints, no Web3Forms integration code (access keys, redirect inputs, success/error handling). Just build the HTML form with its fields, labels, and a submit button. The form action, hidden inputs, and submission behavior are wired up by a separate build pipeline after export.
 
 Page structure:
@@ -246,7 +245,7 @@ Page structure:
   - Each page's BODY content is purpose-appropriate for its filename:
     - \`about.html\` → about/story, team or owner bio, values, certifications, why-us, plus a CTA back to home or contact
     - \`services.html\` → full breakdown of every service with descriptions, pricing or "request quote", plus CTA
-    - \`contact.html\` → full contact form (name, phone, email, message, submit), business hours, address, phone number, service area, map placeholder image
+    - \`contact.html\` → contact form (if appropriate for the business), business hours, address, phone number, service area, booking/scheduling CTA if relevant, map placeholder image
     - \`gallery.html\` / \`portfolio.html\` → image grid with placeholders, captions, CTA
     - \`pricing.html\` → pricing tiers/cards, FAQ, CTA
     - Any other page → real, substantial content fitting the page's purpose

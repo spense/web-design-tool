@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { streamChat, pollJobResult, api } from '../api.js';
-import { parseFileBlocks, detectUrl, generationStartIndex, isCompleteHtmlDoc } from '../parseFiles.js';
+import { parseFileBlocks, detectUrl, isCompleteHtmlDoc } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, editStartIndex } from '../parsePatch.js';
 import Spinner from './Spinner.jsx';
 
@@ -568,9 +568,6 @@ function StreamingMessage({ text, model, isUpdate, startedAt }) {
   }, [startedAt]);
 
   const editIdx = editStartIndex(text);
-  const genIdx = generationStartIndex(text);
-  const proseOnly = genIdx === -1 ? text : text.slice(0, genIdx).trim();
-  const generating = genIdx !== -1;
   let label;
   if (editIdx !== -1) label = 'Applying edits';
   else if (isUpdate) label = 'Updating design';
@@ -580,8 +577,7 @@ function StreamingMessage({ text, model, isUpdate, startedAt }) {
     <div className="chat-msg assistant">
       <div className="who">assistant · {MODEL_LABELS[model] || model}</div>
       <div className="body">
-        {proseOnly}
-        <span className="gen-status" style={{ marginTop: proseOnly ? 8 : 0, display: 'flex' }}>
+        <span className="gen-status" style={{ display: 'flex' }}>
           <Spinner /> {label}… ({formatDuration(elapsed)})
         </span>
       </div>
