@@ -1,7 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Spinner from './Spinner.jsx';
 import ToolsMenu from './ToolsMenu.jsx';
+import SelectionToolbar from './SelectionToolbar.jsx';
+import SelectionPanel from './SelectionPanel.jsx';
+import { IconPointer } from '../inlineEdit/icons.jsx';
 import { extractTokens } from '../tokenRewriter.js';
+import {
+  getSelectorPath,
+  resolveSelectorPath,
+  getElementChain,
+  isSelectable,
+} from '../inlineEdit/selectionUtils.js';
 
 const VIEWPORTS = {
   desktop: { label: 'Desktop', width: '100%' },
@@ -19,6 +28,25 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   const scrollAnimationsRef = useRef(scrollAnimations);
   scrollAnimationsRef.current = scrollAnimations;
   const [displayHtml, setDisplayHtml] = useState('');
+
+  // ── Inline selection state ────────────────────────────────────────────────
+  // Selection mode toggle. When OFF, the iframe behaves normally (anchor
+  // clicks navigate). When ON, clicks select elements for inline editing.
+  const [selectMode, setSelectMode] = useState(false);
+  // Path of nth-child indices from <body> down to the chosen element.
+  // Persists across iframe re-renders so the selection re-resolves on re-mount.
+  const [selectorPath, setSelectorPath] = useState(null);
+  // Index into the ancestor chain. 0 = outermost ancestor, last = clicked el.
+  const [chainIndex, setChainIndex] = useState(0);
+  // Live ancestor chain for the currently-selected element (refs into the iframe DOM).
+  const [chain, setChain] = useState([]);
+  // Selected element's rect, translated into the PARENT viewport.
+  const [selectionRect, setSelectionRect] = useState(null);
+  // Which inline action is currently open in the panel.
+  const [activeAction, setActiveAction] = useState(null);
+
+  const selectModeRef = useRef(selectMode);
+  selectModeRef.current = selectMode;
 
   const pageNames = Object.keys(pages || {});
   const rawHtml = pages?.[activePage] || '';
@@ -76,6 +104,58 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     return () => document.removeEventListener('mousedown', onDoc);
   }, [pageMenuOpen]);
 
+  // Translate an iframe-viewport rect into PARENT viewport coordinates.
+  const translateRect = useCallback((rect) => {
+    const iframe = iframeRef.current;
+    if (!iframe || !rect) return null;
+    const ifr = iframe.getBoundingClientRect();
+    return {
+      top: ifr.top + rect.top,
+      left: ifr.left + rect.left,
+      right: ifr.left + rect.right,
+      bottom: ifr.top + rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    };
+  }, []);
+
+  // Update the iframe-side selection overlay div + the parent toolbar position
+  // for the element at chain[chainIndex].
+  const repositionForSelection = useCallback(() => {
+    const iframe = iframeRef.current;
+    const doc = iframe?.contentDocument;
+    if (!doc) return;
+    const el = chain[chainIndex];
+    const overlay = doc.getElementById('__sel-active');
+    if (!el || !overlay) {
+      if (overlay) overlay.style.display = 'none';
+      setSelectionRect(null);
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    const win = iframe.contentWindow;
+    overlay.style.display = 'block';
+    overlay.style.top    = `${rect.top + (win?.scrollY || 0)}px`;
+    overlay.style.left   = `${rect.left + (win?.scrollX || 0)}px`;
+    overlay.style.width  = `${rect.width}px`;
+    overlay.style.height = `${rect.height}px`;
+    setSelectionRect(translateRect(rect));
+  }, [chain, chainIndex, translateRect]);
+
+  // Clear all selection state.
+  const clearSelection = useCallback(() => {
+    setSelectorPath(null);
+    setChain([]);
+    setChainIndex(0);
+    setSelectionRect(null);
+    setActiveAction(null);
+    const doc = iframeRef.current?.contentDocument;
+    const overlay = doc?.getElementById('__sel-active');
+    if (overlay) overlay.style.display = 'none';
+    const hover = doc?.getElementById('__sel-hover');
+    if (hover) hover.style.display = 'none';
+  }, []);
+
   // Intercept iframe nav clicks; ALSO close any open popovers when the user
   // clicks anywhere inside the iframe (parent doc's mousedown listener can't
   // see clicks inside a child document).
@@ -117,6 +197,189 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     iframe.addEventListener('load', onLoad);
     return () => iframe.removeEventListener('load', onLoad);
   }, [displayHtml, pages, onActivePage]);
+
+  // ── Install selection overlays + listeners inside the iframe ──────────────
+  // Runs whenever displayHtml changes (iframe re-mounts) or selectMode flips.
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !displayHtml) return;
+
+    let mounted = true;
+    let cleanupFns = [];
+
+    const install = () => {
+      const doc = iframe.contentDocument;
+      const win = iframe.contentWindow;
+      if (!doc || !doc.body) return;
+      // Idempotency: never double-install on the same doc instance.
+      // (srcDoc swaps create a new doc, which won't carry this flag.)
+      if (doc.__selInstalled) return;
+      doc.__selInstalled = true;
+
+      // Inject overlay style + divs once per iframe doc.
+      if (!doc.getElementById('__sel-style')) {
+        const style = doc.createElement('style');
+        style.id = '__sel-style';
+        style.textContent = `
+          #__sel-hover, #__sel-active {
+            position: absolute;
+            pointer-events: none;
+            z-index: 2147483646;
+            box-sizing: border-box;
+            display: none;
+          }
+          #__sel-hover {
+            outline: 1.5px dashed #7c9cff;
+            outline-offset: -1px;
+            background: rgba(124, 156, 255, 0.06);
+          }
+          #__sel-active {
+            outline: 2px solid #7c9cff;
+            outline-offset: -1px;
+            background: rgba(124, 156, 255, 0.10);
+          }
+          html.__sel-mode, html.__sel-mode * { cursor: default !important; }
+        `;
+        doc.head.appendChild(style);
+      }
+      const ensureDiv = (id) => {
+        let el = doc.getElementById(id);
+        if (!el) {
+          el = doc.createElement('div');
+          el.id = id;
+          doc.body.appendChild(el);
+        }
+        return el;
+      };
+      const hoverEl = ensureDiv('__sel-hover');
+      const activeEl = ensureDiv('__sel-active');
+
+      // Re-resolve any existing selection path against the (possibly new) DOM.
+      if (selectorPath) {
+        const resolved = resolveSelectorPath(selectorPath, doc);
+        if (resolved) {
+          const newChain = getElementChain(resolved, doc);
+          if (mounted) {
+            setChain(newChain);
+            // Clamp chainIndex into new chain length.
+            setChainIndex(i => Math.min(i, newChain.length - 1));
+          }
+        }
+      } else {
+        hoverEl.style.display = 'none';
+        activeEl.style.display = 'none';
+      }
+
+      const onMouseMove = (e) => {
+        if (!selectModeRef.current) {
+          hoverEl.style.display = 'none';
+          return;
+        }
+        const target = e.target;
+        if (!isSelectable(target, doc) || target === hoverEl || target === activeEl) {
+          hoverEl.style.display = 'none';
+          return;
+        }
+        const r = target.getBoundingClientRect();
+        hoverEl.style.display = 'block';
+        hoverEl.style.top    = `${r.top + (win.scrollY || 0)}px`;
+        hoverEl.style.left   = `${r.left + (win.scrollX || 0)}px`;
+        hoverEl.style.width  = `${r.width}px`;
+        hoverEl.style.height = `${r.height}px`;
+      };
+      const onMouseLeave = () => { hoverEl.style.display = 'none'; };
+
+      // Capture-phase click handler — intercepts before anchor handlers
+      // (which were attached on bubble in the onLoad effect above).
+      const onClickCapture = (e) => {
+        if (!selectModeRef.current) return;
+        const target = e.target;
+        if (!isSelectable(target, doc)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const path = getSelectorPath(target, doc);
+        if (!path) return;
+        const newChain = getElementChain(target, doc);
+        setSelectorPath(path);
+        setChain(newChain);
+        setChainIndex(newChain.length - 1);
+        setActiveAction(null);
+      };
+
+      const onScroll = () => repositionForSelection();
+
+      doc.addEventListener('mousemove', onMouseMove);
+      doc.addEventListener('mouseleave', onMouseLeave);
+      doc.addEventListener('click', onClickCapture, { capture: true });
+      win.addEventListener('scroll', onScroll, { passive: true });
+
+      cleanupFns.push(() => {
+        doc.removeEventListener('mousemove', onMouseMove);
+        doc.removeEventListener('mouseleave', onMouseLeave);
+        doc.removeEventListener('click', onClickCapture, { capture: true });
+        win.removeEventListener('scroll', onScroll);
+      });
+    };
+
+    // Two install triggers — always attach the load listener (so srcDoc
+    // swaps get fresh listeners on the new doc) AND attempt right now (in
+    // case the doc is already loaded by the time this effect runs). The
+    // __selInstalled flag on the doc makes both paths idempotent per-doc.
+    iframe.addEventListener('load', install);
+    install();
+    cleanupFns.push(() => iframe.removeEventListener('load', install));
+
+    return () => {
+      mounted = false;
+      // Clear the install marker on the current doc so a fresh effect
+      // iteration can re-install if React re-runs us for the same doc.
+      try {
+        const d = iframe.contentDocument;
+        if (d) delete d.__selInstalled;
+      } catch {}
+      cleanupFns.forEach(fn => { try { fn(); } catch {} });
+    };
+    // Re-install when iframe content changes. selectorPath intentionally NOT
+    // a dep — we resolve it inside install using the closure's value, and
+    // a separate effect handles selection-only updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayHtml]);
+
+  // When chain / chainIndex change, reposition overlay + parent toolbar.
+  useEffect(() => {
+    repositionForSelection();
+  }, [chain, chainIndex, repositionForSelection]);
+
+  // Reposition on parent window resize.
+  useEffect(() => {
+    const onResize = () => repositionForSelection();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [repositionForSelection]);
+
+  // Esc to deselect.
+  useEffect(() => {
+    if (!selectorPath) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        clearSelection();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectorPath, clearSelection]);
+
+  // Clear selection when select mode is turned off.
+  useEffect(() => {
+    if (!selectMode) clearSelection();
+  }, [selectMode, clearSelection]);
+
+  // Force arrow cursor inside iframe when select mode is on.
+  useEffect(() => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc?.documentElement) return;
+    doc.documentElement.classList.toggle('__sel-mode', selectMode);
+  }, [selectMode, displayHtml]);
 
   // Sync animation toggle override into iframe
   useEffect(() => {
@@ -234,6 +497,16 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
               />
             )}
           </div>
+          <button
+            type="button"
+            className={`inspect-toggle ${selectMode ? 'active' : ''}`}
+            onClick={() => setSelectMode(m => !m)}
+            disabled={!html}
+            title={selectMode ? 'Exit select mode' : 'Enter select mode'}
+          >
+            <IconPointer />
+            <span>Select</span>
+          </button>
           <div className="undo-redo">
             <button onClick={onUndo} disabled={!canUndo} title="Undo">
               <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -287,6 +560,43 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
           <div className="preview-empty">
             No design yet. Send a message in chat to generate one.
           </div>
+        )}
+        {selectMode && selectionRect && chain.length > 0 && (
+          <SelectionToolbar
+            rect={selectionRect}
+            chain={chain}
+            selectedIndex={chainIndex}
+            onPick={(i) => {
+              setChainIndex(i);
+              // Update selectorPath to the picked ancestor so reload survives.
+              const el = chain[i];
+              const doc = iframeRef.current?.contentDocument;
+              if (el && doc) {
+                const p = getSelectorPath(el, doc);
+                if (p) setSelectorPath(p);
+              }
+            }}
+            onAction={(actionId) => {
+              if (actionId === 'remove') {
+                const el = chain[chainIndex];
+                const tag = el?.tagName?.toLowerCase() || 'element';
+                if (window.confirm(`Remove this <${tag}>?`)) {
+                  // Wired in a later step. For now, just clear selection.
+                  clearSelection();
+                }
+                return;
+              }
+              setActiveAction(actionId);
+            }}
+            activeAction={activeAction}
+          />
+        )}
+        {selectMode && activeAction && chain[chainIndex] && (
+          <SelectionPanel
+            action={activeAction}
+            element={chain[chainIndex]}
+            onClose={() => setActiveAction(null)}
+          />
         )}
       </div>
     </div>
