@@ -1,5 +1,7 @@
 import React from 'react';
 import { shortLabel } from '../inlineEdit/selectionUtils.js';
+import EditTextPanel from './inlinePanels/EditTextPanel.jsx';
+import RewriteTextPanel from './inlinePanels/RewriteTextPanel.jsx';
 
 const ACTION_LABELS = {
   'replace-visual': 'Replace visual',
@@ -10,9 +12,30 @@ const ACTION_LABELS = {
 };
 
 // Floating panel anchored to the lower-right of the preview area.
-// Height grows with content; closing is explicit (✕ or Esc).
-export default function SelectionPanel({ action, element, onClose }) {
+// Dispatches to the sub-view that matches `action`.
+export default function SelectionPanel({ action, element, onClose, onApply }) {
   if (!action || !element) return null;
+
+  // Detect whether the element has children (so the editor can warn that
+  // saving will replace them with plain text).
+  const hasMixedChildren = !!(element.children && element.children.length > 0);
+
+  let body;
+  switch (action) {
+    case 'edit-text':
+      body = <EditTextPanel element={element} onApply={onApply} hasMixedChildren={hasMixedChildren} />;
+      break;
+    case 'rewrite-text':
+      body = <RewriteTextPanel element={element} onApply={onApply} hasMixedChildren={hasMixedChildren} />;
+      break;
+    default:
+      body = (
+        <p className="sel-panel-placeholder">
+          This action will be wired in a later step.
+        </p>
+      );
+  }
+
   return (
     <div
       className="selection-panel"
@@ -35,9 +58,7 @@ export default function SelectionPanel({ action, element, onClose }) {
         >✕</button>
       </div>
       <div className="sel-panel-body">
-        <p className="sel-panel-placeholder">
-          Step 1 placeholder. This action will be wired up in a later step.
-        </p>
+        {body}
       </div>
     </div>
   );

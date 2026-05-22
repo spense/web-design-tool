@@ -1,18 +1,41 @@
 // Utilities for selecting and identifying elements inside the preview iframe.
 // Used by the inline-edit toolbar/panel.
 
-// Tags that can carry a meaningful text node we'd want to edit.
-const TEXT_TAGS = new Set([
-  'P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-  'SPAN', 'A', 'BUTTON', 'LI', 'LABEL',
-  'STRONG', 'EM', 'BLOCKQUOTE', 'FIGCAPTION',
-  'SUMMARY', 'TD', 'TH', 'DT', 'DD',
+// Inline-formatting tags. An element whose children are only these (or text
+// nodes) is treated as a "text leaf" — Edit / Rewrite are available because
+// replacing its textContent only loses inline emphasis, not real structure.
+const INLINE_TAGS = new Set([
+  'A', 'SPAN', 'STRONG', 'EM', 'B', 'I', 'U', 'S', 'SMALL', 'MARK', 'CODE',
+  'SUB', 'SUP', 'BR', 'ABBR', 'CITE', 'Q', 'VAR', 'KBD', 'TIME', 'LABEL',
+  'BDI', 'BDO', 'WBR', 'INS', 'DEL',
+]);
+
+// Tags we never want to treat as text-editable even if they happen to have
+// only inline children (these have semantics beyond text content).
+const NEVER_TEXT_LEAF = new Set([
+  'HTML', 'HEAD', 'BODY', 'SCRIPT', 'STYLE', 'SVG', 'PICTURE', 'VIDEO',
+  'AUDIO', 'IFRAME', 'TABLE', 'THEAD', 'TBODY', 'TR', 'FORM', 'UL', 'OL',
+  'INPUT', 'TEXTAREA', 'SELECT', 'OPTION',
 ]);
 
 // Tags we never want to treat as selectable.
 const SKIP_TAGS = new Set([
   'HTML', 'HEAD', 'LINK', 'META', 'SCRIPT', 'STYLE', 'TITLE', 'BASE', 'NOSCRIPT',
 ]);
+
+// Structure-based check: does this element behave like a text container?
+// True when it has non-empty text AND its children (if any) are all inline.
+// Catches text in <div>s, <h2>s, <p>s, <button>s etc. — anywhere text lives
+// without nested block layout — without needing a maintained tag list.
+function isTextLeaf(el) {
+  if (!el || !el.tagName) return false;
+  if (NEVER_TEXT_LEAF.has(el.tagName)) return false;
+  if (!el.textContent || !el.textContent.trim()) return false;
+  for (const child of el.children) {
+    if (!INLINE_TAGS.has(child.tagName)) return false;
+  }
+  return true;
+}
 
 // Build a path of nth-child indices from body down to el.
 // Returns array of integers (each is index into parent.children), or null.
@@ -67,10 +90,12 @@ export function classifyElement(el) {
     const bg = cs?.backgroundImage;
     hasBgImage = !!(bg && bg !== 'none' && /url\(/.test(bg));
   } catch {}
-  const hasOwnTextNode = Array.from(el.childNodes || []).some(
-    n => n.nodeType === 3 && n.textContent.trim()
-  );
-  const isTextBearing = TEXT_TAGS.has(tag) && hasOwnTextNode;
+  // Text-bearing = structurally a text leaf (text content + only inline
+  // children). Includes <div>Trusted since 1962</div> and similar — common
+  // pattern in these designs — without polluting block containers like
+  // <section> or <div class="card"> with edit-text actions that would
+  // destroy their nested layout.
+  const isTextBearing = isTextLeaf(el);
   const isRemovable = !SKIP_TAGS.has(tag) && tag !== 'BODY';
 
   return {
@@ -95,6 +120,33 @@ export function shortLabel(el) {
     cls = '.' + el.className.trim().split(/\s+/)[0];
   }
   return `${tag}${id}${cls}`;
+}
+
+// Capture an identity snapshot of an element at selection time. Used to
+// verify that the saved selector path still points to the SAME element
+// after the iframe re-renders (chat edit, undo, redo). Without this, a path
+// that accidentally lands on a sibling after an ancestor was removed would
+// look like a valid re-resolution.
+export function fingerprintElement(el) {
+  if (!el) return null;
+  return {
+    tag: el.tagName,
+    id: el.id || null,
+    textPrefix: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60),
+    childCount: el.children ? el.children.length : 0,
+  };
+}
+
+// Strict identity check. Returns true only if the element looks like the
+// one captured by fingerprintElement.
+export function matchesFingerprint(snap, el) {
+  if (!snap || !el) return false;
+  if (snap.tag !== el.tagName) return false;
+  if (snap.id !== (el.id || null)) return false;
+  const text = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+  if (snap.textPrefix !== text) return false;
+  if (snap.childCount !== (el.children ? el.children.length : 0)) return false;
+  return true;
 }
 
 // Whether an element is a valid selection target.

@@ -98,6 +98,7 @@ export const api = {
   },
   selectFavicon: (slug, selected) => jsonReq('PATCH', `/projects/${slug}/favicon/select`, { selected }),
   deleteUploadedFavicon: (slug) => jsonReq('DELETE', `/projects/${slug}/favicon/uploaded`),
+  inlineRewriteText: (text, prompt) => jsonReq('POST', '/inline/rewrite-text', { text, prompt }),
 };
 
 // Streaming chat: calls onDelta(chunk) and resolves with full text on done.

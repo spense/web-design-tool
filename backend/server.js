@@ -17,6 +17,7 @@ import appStateRouter from './routes/appState.js';
 import uploadsRouter from './routes/uploads.js';
 import faviconRouter from './routes/favicon.js';
 import pixabayRouter from './routes/pixabay.js';
+import inlineRouter from './routes/inline.js';
 import { ensureProjectsDir } from './storage.js';
 
 const app = express();
@@ -41,6 +42,7 @@ app.use('/api/export', exportRouter);
 app.use('/api/import', importRouter);
 app.use('/api/app-state', appStateRouter);
 app.use('/api/pixabay', pixabayRouter);
+app.use('/api/inline', inlineRouter);
 
 app.use((err, req, res, next) => {
   console.error(err);

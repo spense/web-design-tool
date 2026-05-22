@@ -698,6 +698,79 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   font-size: 12.5px;
   margin: 0;
 }
+
+/* Shared panel form styles (edit-text, rewrite, etc.) */
+.panel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.panel-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  margin-top: 4px;
+}
+.panel-label:first-child {
+  margin-top: 0;
+}
+.panel-textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text);
+}
+.panel-textarea:focus {
+  border-color: var(--accent);
+}
+.panel-original,
+.panel-proposal {
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  max-height: 100px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.panel-proposal {
+  color: var(--text);
+  border-color: var(--accent);
+  background: rgba(124, 156, 255, 0.08);
+}
+.panel-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 4px 0;
+}
+.panel-error {
+  font-size: 11.5px;
+  color: var(--danger);
+  padding: 4px 0;
+}
+.panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+}
+.panel-footer button {
+  font-size: 12px;
+  padding: 5px 14px;
+}
 .preview-frame {
   background: white;
   border: none;
