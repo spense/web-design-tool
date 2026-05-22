@@ -51,7 +51,8 @@ export default function SelectionToolbar({
     actions.push({ id: 'edit-text',    Icon: IconPencil,   label: 'Edit text' });
     actions.push({ id: 'rewrite-text', Icon: IconSparkles, label: 'Rewrite' });
   }
-  actions.push({ id: 'prompt-change', Icon: IconWand,  label: 'Prompt' });
+  // Prompt is redundant for SVG (Replace SVG already has a prompt field).
+  if (!klass.isSvg) actions.push({ id: 'prompt-change', Icon: IconWand, label: 'Prompt' });
   if (klass.isRemovable) actions.push({ id: 'remove', Icon: IconTrash, label: 'Remove' });
 
   return (

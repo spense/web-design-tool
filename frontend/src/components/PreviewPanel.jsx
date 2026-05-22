@@ -654,36 +654,79 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
           <SelectionPanel
             action={activeAction}
             element={chain[chainIndex]}
+            slug={slug}
             onClose={() => setActiveAction(null)}
             onApply={(payload) => {
-              // For edit-text / rewrite-text: payload is the new text string.
+              const target = chain[chainIndex];
+              let mutator = null;
+              let updatedFingerprint = null;
+
+              // ── Text edit + rewrite ────────────────────────────────────
               if (activeAction === 'edit-text' || activeAction === 'rewrite-text') {
-                const newHtml = commitInlineEdit({
-                  sourceHtml: pages?.[activePage] || '',
-                  selectorPath,
-                  mutator: (target) => {
-                    target.textContent = payload;
-                  },
-                });
-                if (!newHtml) {
-                  console.warn('[inline-edit] text edit failed: could not resolve element');
-                  return;
-                }
-                // Re-fingerprint BEFORE pushing the new HTML so the install
-                // effect's identity check passes when the iframe re-renders.
-                // The element's tag, id, and position don't change; only text
-                // and childCount (mixed children get nuked) do.
-                const target = chain[chainIndex];
-                const updatedFingerprint = {
+                const text = payload;
+                mutator = (t) => { t.textContent = text; };
+                updatedFingerprint = {
                   tag: target.tagName,
                   id: target.id || null,
-                  textPrefix: payload.trim().replace(/\s+/g, ' ').slice(0, 60),
-                  childCount: 0, // textContent assignment removes all children
+                  textPrefix: text.trim().replace(/\s+/g, ' ').slice(0, 60),
+                  childCount: 0,
                 };
-                setSelectionFingerprint(updatedFingerprint);
-                onApplyTokens({ ...pages, [activePage]: newHtml });
-                setActiveAction(null);
               }
+              // ── Replace visual ─────────────────────────────────────────
+              else if (activeAction === 'replace-visual') {
+                if (payload.kind === 'image') {
+                  const newPath = payload.path;
+                  if (target.tagName === 'IMG') {
+                    mutator = (t) => { t.setAttribute('src', newPath); };
+                  } else {
+                    // Element with background-image — write an inline style
+                    // override. (Class/stylesheet-driven backgrounds get
+                    // overridden by inline; we accept the small style-attr
+                    // pollution for v1.)
+                    mutator = (t) => {
+                      const prev = t.getAttribute('style') || '';
+                      const cleaned = prev.replace(/background-image\s*:\s*[^;]+;?\s*/gi, '').trim();
+                      const next = `${cleaned}${cleaned && !cleaned.endsWith(';') ? ';' : ''} background-image: url("${newPath}");`.trim();
+                      t.setAttribute('style', next);
+                    };
+                  }
+                  // Path-based replace; fingerprint stays valid (no text/child changes).
+                  updatedFingerprint = null;
+                } else if (payload.kind === 'svg') {
+                  const newMarkup = payload.markup;
+                  // Parse the sanitized markup in the source-HTML doc and
+                  // swap it in for the existing <svg>.
+                  mutator = (t, doc) => {
+                    const tmp = doc.createElement('div');
+                    tmp.innerHTML = newMarkup;
+                    const fresh = tmp.firstElementChild;
+                    if (!fresh || fresh.tagName.toLowerCase() !== 'svg') return;
+                    t.replaceWith(fresh);
+                  };
+                  // The new SVG is a different DOM node; treat the selection
+                  // as having moved to the replacement (same path/position).
+                  updatedFingerprint = {
+                    tag: 'svg',
+                    id: null,
+                    textPrefix: '',
+                    childCount: 0, // we don't know without parsing — be lenient
+                  };
+                }
+              }
+
+              if (!mutator) return;
+              const newHtml = commitInlineEdit({
+                sourceHtml: pages?.[activePage] || '',
+                selectorPath,
+                mutator,
+              });
+              if (!newHtml) {
+                console.warn('[inline-edit] commit failed: could not resolve element');
+                return;
+              }
+              if (updatedFingerprint) setSelectionFingerprint(updatedFingerprint);
+              onApplyTokens({ ...pages, [activePage]: newHtml });
+              setActiveAction(null);
             }}
           />
         )}

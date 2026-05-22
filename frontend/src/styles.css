@@ -771,6 +771,138 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   font-size: 12px;
   padding: 5px 14px;
 }
+
+/* ── Replace visual: search + thumbnails + upload ──────────────────────── */
+.rv-search-row {
+  display: flex;
+  gap: 6px;
+}
+.rv-search-input {
+  flex: 1;
+  font-size: 13px;
+}
+.rv-search-row button {
+  font-size: 12px;
+  padding: 5px 12px;
+}
+.rv-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rv-thumb {
+  display: block;            /* override global button inline-flex */
+  position: relative;
+  width: 100%;
+  height: 0;
+  padding: 0 0 100% 0;       /* padding-bottom hack: forces square 1:1 */
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  background: var(--bg-elev);
+  cursor: pointer;
+  transition: border-color 0.1s, transform 0.1s;
+}
+.rv-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.rv-thumb:hover {
+  border-color: var(--accent);
+  transform: scale(1.02);
+}
+.rv-thumb:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.rv-thumb.picking {
+  border-color: var(--accent);
+}
+.rv-thumb-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(14, 15, 18, 0.6);
+}
+.rv-empty {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  font-style: italic;
+  padding: 8px 4px;
+  text-align: center;
+}
+.rv-or {
+  margin-top: 8px;
+}
+.rv-upload {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 6px;
+  padding: 14px 10px;
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-dim);
+  transition: border-color 0.1s, color 0.1s, background 0.1s;
+}
+.rv-upload:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(124, 156, 255, 0.04);
+}
+.rv-upload.uploading {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.rv-upload span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rv-advanced-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  text-align: left;
+  padding: 6px 0;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.rv-advanced-toggle:hover {
+  color: var(--text);
+  background: transparent;
+}
+.rv-svg-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--text);
+  min-height: 80px;
+}
+.rv-svg-preview svg {
+  width: 48px;
+  height: 48px;
+  display: block;
+}
 .preview-frame {
   background: white;
   border: none;

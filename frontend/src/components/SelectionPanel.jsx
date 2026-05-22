@@ -2,6 +2,7 @@ import React from 'react';
 import { shortLabel } from '../inlineEdit/selectionUtils.js';
 import EditTextPanel from './inlinePanels/EditTextPanel.jsx';
 import RewriteTextPanel from './inlinePanels/RewriteTextPanel.jsx';
+import ReplaceVisualPanel from './inlinePanels/ReplaceVisualPanel.jsx';
 
 const ACTION_LABELS = {
   'replace-visual': 'Replace visual',
@@ -13,7 +14,7 @@ const ACTION_LABELS = {
 
 // Floating panel anchored to the lower-right of the preview area.
 // Dispatches to the sub-view that matches `action`.
-export default function SelectionPanel({ action, element, onClose, onApply }) {
+export default function SelectionPanel({ action, element, slug, onClose, onApply }) {
   if (!action || !element) return null;
 
   // Detect whether the element has children (so the editor can warn that
@@ -27,6 +28,9 @@ export default function SelectionPanel({ action, element, onClose, onApply }) {
       break;
     case 'rewrite-text':
       body = <RewriteTextPanel element={element} onApply={onApply} hasMixedChildren={hasMixedChildren} />;
+      break;
+    case 'replace-visual':
+      body = <ReplaceVisualPanel element={element} slug={slug} onApply={onApply} />;
       break;
     default:
       body = (

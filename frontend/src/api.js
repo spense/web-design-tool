@@ -99,6 +99,21 @@ export const api = {
   selectFavicon: (slug, selected) => jsonReq('PATCH', `/projects/${slug}/favicon/select`, { selected }),
   deleteUploadedFavicon: (slug) => jsonReq('DELETE', `/projects/${slug}/favicon/uploaded`),
   inlineRewriteText: (text, prompt) => jsonReq('POST', '/inline/rewrite-text', { text, prompt }),
+  inlineGenerateSvg: (prompt, currentSvg) => jsonReq('POST', '/inline/generate-svg', { prompt, currentSvg }),
+  inlinePixabaySearch: (q) => jsonReq('GET', `/inline/pixabay-search?q=${encodeURIComponent(q)}`),
+  inlinePixabayDownload: (slug, hit) => jsonReq('POST', '/inline/download-pixabay', {
+    slug, url: hit.largeImageURL, tags: hit.tags, id: hit.id,
+  }),
+  inlineUploadFile: async (slug, file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${API}/projects/${slug}/uploads`, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    return res.json(); // { filename, ... }
+  },
 };
 
 // Streaming chat: calls onDelta(chunk) and resolves with full text on done.
