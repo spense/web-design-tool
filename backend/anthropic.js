@@ -384,6 +384,36 @@ When the user requests a multi-page site, your FIRST response must:
 
 When the runtime asks you for a specific page (e.g. "Generate the next page: about.html"), emit ONLY that one file in FULL FILE MODE, with the same nav/header/footer markup, same \`:root\` tokens, and same fonts as the index. Do NOT emit a PAGES marker on follow-up turns — only the very first turn declares the plan. Keep prose minimal between turns.`;
 
+// Injected into the system prompt when the user is using the inline-edit
+// toolbar's "Prompt" action. Constrains output to ONE INLINE block per turn,
+// surgical edits scoped to the selected element only.
+export const INLINE_MODE = `
+
+# INLINE MODE — scoped single-element edit
+
+The user is editing ONE specific element using the inline-edit toolbar in the design preview. They are NOT asking for a page-wide change. The runtime will inject the element's location, current outerHTML, and root tag below.
+
+For this turn, you must:
+
+1. Output ONE \`<!-- INLINE: <selectorPath> in <page> -->\` block containing the complete modified element. Nothing else.
+2. The block contents must be EXACTLY ONE root element. The root tag MUST stay the same as the original (e.g. <h2> stays <h2>, <section> stays <section>).
+3. Do NOT use FILE, EDIT, REGION, or PATCH modes for this turn. Do NOT emit unrelated changes. The user's request applies ONLY to the scoped element.
+4. Do NOT add sibling elements alongside the target. If the user asks to "replace" something, replace IT — don't add a new copy next to it.
+5. Format:
+\`\`\`
+Brief commentary (one line is fine).
+
+<!-- INLINE: 1.2.0 in index.html -->
+<h2 class="hero-title">…</h2>
+\`\`\`
+6. The selectorPath and filename you emit must match the ones the runtime tells you below — copy them exactly.
+7. CSS limitation: you only see the element's outerHTML, not the page stylesheet. For visual changes (colors, borders, padding) emit an inline \`style="…"\` override. Don't try to modify class CSS — you can't see it.
+8. Use the project's existing crawl data (business name, services, tone) to make the content actually relevant. Don't generate generic placeholder copy.
+9. Match the surrounding design system's apparent style — utility classes, CSS variables, etc.
+10. Never include \`<script>\`, \`<iframe>\`, \`<object>\`, \`<embed>\`, \`<foreignObject>\`, or any \`on*\` event-handler attributes. The runtime sanitizes these but it's bad form to emit them.
+
+If the request fundamentally requires touching multiple elements or page-wide CSS (e.g. "change the site's primary color"), say so briefly and ask the user to use the main chat instead — don't emit an INLINE block in that case.`;
+
 // Layout archetypes for random injection when the user prompt doesn't specify one.
 export const LAYOUT_ARCHETYPES = [
   'classic-stack',
