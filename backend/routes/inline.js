@@ -82,6 +82,72 @@ STYLE CONVENTIONS:
   }
 });
 
+// POST /api/inline/prompt-change
+// Body: { outerHTML: string, prompt: string }
+// Returns: { html: string, rootTag: string }
+//
+// Sonnet 4.6 — the model must return ONE complete element with the same
+// root tag as the input. Frontend validates + sanitizes before applying.
+router.post('/prompt-change', async (req, res, next) => {
+  try {
+    const { outerHTML, prompt } = req.body || {};
+    if (typeof outerHTML !== 'string' || !outerHTML.trim()) {
+      return res.status(400).json({ error: 'outerHTML is required' });
+    }
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+      return res.status(400).json({ error: 'prompt is required' });
+    }
+
+    // Sniff the root tag so we can enforce it in the system prompt.
+    const m = outerHTML.match(/^\s*<([a-zA-Z][a-zA-Z0-9-]*)/);
+    const rootTag = m ? m[1].toLowerCase() : 'div';
+
+    const client = getAnthropic();
+    const msg = await client.messages.create({
+      model: MODELS.sonnet,
+      max_tokens: 4000,
+      system:
+`You are modifying ONE HTML element in a website design. The user gives you the element's current outerHTML and an instruction. Return only the modified element's complete outerHTML.
+
+STRICT OUTPUT RULES:
+- Output ONLY the modified element's outerHTML — starting with < and ending with >.
+- No code fences, no commentary, no explanation, no prose.
+- The root tag MUST stay <${rootTag}>. Do not change it (e.g. don't convert <h2> to <h3>).
+- Return exactly ONE root element. No sibling elements.
+- Never include <script>, <iframe>, <object>, <embed>, <foreignObject>, or any on* event-handler attributes.
+- Preserve unrelated attributes (id, classes, data-*) unless the instruction implies changing them.
+- If the instruction is small (e.g. change a color, edit a word, add a class), make the minimal edit. Don't restructure.
+- If the instruction implies layout/structural change inside this element, you may add/remove descendants — but the root stays the same.
+- Match the existing design's apparent style (Tailwind-like utility classes if you see them, custom CSS variables, etc.).`,
+      messages: [{
+        role: 'user',
+        content:
+`Current element:
+${outerHTML}
+
+Instruction: ${prompt}
+
+Return only the modified element's complete outerHTML, with the same <${rootTag}> root.`,
+      }],
+    });
+
+    let out = (msg.content?.[0]?.text || '').trim();
+    // Strip code fences if the model added them anyway.
+    out = out.replace(/^```(?:html|xml)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    // Slice from first '<' to last '>' to drop stray prose.
+    const start = out.indexOf('<');
+    const end = out.lastIndexOf('>');
+    if (start < 0 || end < 0 || end < start) {
+      return res.status(502).json({ error: 'model returned non-HTML output' });
+    }
+    out = out.slice(start, end + 1);
+
+    res.json({ html: out, rootTag });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/inline/download-pixabay
 // Body: { slug, url, tags, id }
 // Downloads the chosen Pixabay image into the project's uploads/ dir using

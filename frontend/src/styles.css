@@ -262,6 +262,80 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   flex-direction: column;
   gap: 8px;
 }
+
+/* Inline-edit scope pill: appears above the textarea when the user clicked
+   the Prompt action in the inline-edit toolbar. */
+.chat-inline-scope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 10px;
+  background: rgba(124, 156, 255, 0.10);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--text);
+  font-family: var(--mono);
+}
+.chat-inline-scope .scope-label {
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 11px;
+}
+.chat-inline-scope .scope-bc {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  background: transparent;
+  padding: 0;
+  border: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-inline-scope .scope-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.chat-inline-scope .scope-clear:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* Chip on user-message bubbles indicating the turn was scoped to one element. */
+.msg-inline-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  margin-bottom: 4px;
+  background: rgba(124, 156, 255, 0.10);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  max-width: 100%;
+  overflow: hidden;
+}
+.msg-inline-chip code {
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .chat-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -902,6 +976,27 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   width: 48px;
   height: 48px;
   display: block;
+}
+
+/* ── Prompt change preview ─────────────────────────────────────────────── */
+.pc-target {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.pc-preview {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--text);
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
 }
 .preview-frame {
   background: white;

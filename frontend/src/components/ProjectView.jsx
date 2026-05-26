@@ -19,6 +19,11 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const historyRef = useRef({ list: [], index: -1 });
+  // Inline-edit scope: when set, the next chat turn is constrained to ONE
+  // element. The Prompt button in the inline-edit toolbar populates this;
+  // ChatPanel renders a pill and includes it in the request; clears on send
+  // or via the pill's ✕.
+  const [inlineScope, setInlineScope] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -258,6 +263,8 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
           onUpdate={updatePages}
           hasApiKey={hasApiKey}
           onStreamingChange={onStreamingChange}
+          inlineScope={inlineScope}
+          onClearInlineScope={() => setInlineScope(null)}
         />
       )}
       <PreviewPanel
@@ -280,6 +287,11 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
         canRedo={canRedo}
         onUndo={handleUndo}
         onRedo={handleRedo}
+        onInlinePrompt={(scope) => {
+          // Auto-expand chat if collapsed so the user can see the pill.
+          if (chatCollapsed) setChatCollapsed(false);
+          setInlineScope(scope);
+        }}
       />
       {exportResult && (
         <ExportModal

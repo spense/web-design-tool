@@ -8,7 +8,6 @@ const ACTION_LABELS = {
   'replace-visual': 'Replace visual',
   'edit-text':      'Edit text',
   'rewrite-text':   'Rewrite with AI',
-  'prompt-change':  'Prompt change',
   'remove':         'Remove',
 };
 

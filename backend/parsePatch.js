@@ -239,3 +239,90 @@ function replaceFirstElement(html, tag, newContent) {
   }
   return null;
 }
+
+// ─── INLINE blocks: scoped single-element edits from inline-edit toolbar ───
+//
+// Format emitted by the model:
+//   <!-- INLINE: <selectorPath> in <page> -->
+//   <element ...>...</element>
+//
+// `selectorPath` is dot-joined nth-child indices from <body> down (e.g. "1.0.3").
+// Block ends at the next HTML comment marker (or end of text). Only ONE root
+// element is allowed inside the block.
+
+import { load as loadCheerio } from 'cheerio';
+
+const INLINE_HEADER_RE = /<!--\s*INLINE:\s*([0-9.]+)\s+in\s+([^\s>]+)\s*-->/gi;
+// Only OUR marker comments terminate an INLINE block. Arbitrary HTML comments
+// inside the element body (e.g. inside an SVG) must not terminate it early.
+const MARKER_RE = /<!--\s*(?:INLINE|FILE|EDIT|REGION|PAGES):/gi;
+
+export function parseInlineBlocks(text) {
+  const headers = [];
+  let m;
+  INLINE_HEADER_RE.lastIndex = 0;
+  while ((m = INLINE_HEADER_RE.exec(text)) !== null) {
+    headers.push({
+      path: m[1].trim(),
+      filename: m[2].trim(),
+      contentStart: m.index + m[0].length,
+    });
+  }
+  if (headers.length === 0) return [];
+
+  const blocks = [];
+  for (let i = 0; i < headers.length; i++) {
+    const start = headers[i].contentStart;
+    MARKER_RE.lastIndex = start;
+    const next = MARKER_RE.exec(text);
+    const end = next ? next.index : text.length;
+    const markup = text.slice(start, end).trim();
+    blocks.push({ path: headers[i].path, filename: headers[i].filename, markup });
+  }
+  return blocks;
+}
+
+// Apply a single INLINE block to a page's HTML string. Returns null if the
+// path doesn't resolve, if the markup parses to zero/multiple roots, or if
+// the root tag doesn't match the existing element's tag.
+export function applyInlineToPage(pageHtml, path, newMarkup) {
+  if (!pageHtml || !path) return null;
+  const $ = loadCheerio(pageHtml, { decodeEntities: false });
+
+  // Resolve the selector path against <body>.
+  const indices = path.split('.').map(Number);
+  if (indices.some(n => Number.isNaN(n))) return null;
+  let node = $('body')[0];
+  if (!node) return null;
+  for (const idx of indices) {
+    const children = node.children.filter(c => c.type === 'tag');
+    if (!children[idx]) return null;
+    node = children[idx];
+  }
+  // Parse the new markup; insist on a single root element with matching tag.
+  const $new = loadCheerio(newMarkup, { decodeEntities: false });
+  const newRoots = $new('body').children().filter((_, el) => el.type === 'tag').toArray();
+  if (newRoots.length !== 1) return null;
+  const newRoot = newRoots[0];
+  if (newRoot.tagName !== node.tagName) return null;
+
+  $(node).replaceWith($(newRoot));
+  // Cheerio's $.html() preserves doctype if present.
+  return $.html();
+}
+
+// Apply all INLINE blocks. Returns { updatedPages, applied, failed }.
+export function applyInlineBlocks(currentPages, blocks) {
+  const updatedPages = { ...currentPages };
+  const applied = [];
+  const failed = [];
+  for (const b of blocks) {
+    const src = updatedPages[b.filename];
+    if (!src) { failed.push({ ...b, reason: 'not_found' }); continue; }
+    const next = applyInlineToPage(src, b.path, b.markup);
+    if (next == null) { failed.push({ ...b, reason: 'no_match_or_tag' }); continue; }
+    updatedPages[b.filename] = next;
+    applied.push({ filename: b.filename, path: b.path });
+  }
+  return { updatedPages, applied, failed };
+}

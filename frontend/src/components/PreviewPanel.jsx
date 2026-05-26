@@ -21,7 +21,7 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo, onInlinePrompt }) {
   const [viewport, setViewport] = useState('desktop');
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -240,7 +240,11 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
         style.textContent = `
           #__sel-hover, #__sel-active {
             position: absolute;
-            pointer-events: none;
+            /* !important so the global html.__sel-mode * { pointer-events:
+               auto !important } rule doesn't make our own overlays
+               mouse-targetable (which would cause a hover-flicker loop:
+               show overlay → target becomes overlay → hide → repeat). */
+            pointer-events: none !important;
             z-index: 2147483646;
             box-sizing: border-box;
             display: none;
@@ -255,7 +259,16 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
             outline-offset: -1px;
             background: rgba(124, 156, 255, 0.10);
           }
-          html.__sel-mode, html.__sel-mode * { cursor: default !important; }
+          /* Force arrow cursor + make every element clickable while editing.
+             pointer-events:none is common on decorative overlays (gradients,
+             glows, bg-image layers) so they don't block clicks on the
+             design's interactive elements — but that also makes them
+             unreachable to our selection tool. We override only while
+             select mode is on; when it's off, the design behaves normally. */
+          html.__sel-mode, html.__sel-mode * {
+            cursor: default !important;
+            pointer-events: auto !important;
+          }
         `;
         doc.head.appendChild(style);
       }
@@ -319,11 +332,39 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
       };
       const onMouseLeave = () => { hoverEl.style.display = 'none'; };
 
+      // Tracks alt-click "dig" cycles. Holding Alt and clicking the same
+      // spot repeatedly walks through every selectable element under the
+      // cursor (top → bottom → wrap), letting the user reach images that
+      // sit beneath overlays / gradients / decorative siblings with a
+      // higher z-index.
+      let lastAltClick = { x: -1, y: -1, idx: -1 };
+
       // Capture-phase click handler — intercepts before anchor handlers
       // (which were attached on bubble in the onLoad effect above).
       const onClickCapture = (e) => {
         if (!selectModeRef.current) return;
-        const target = e.target;
+        let target = e.target;
+
+        if (e.altKey) {
+          // Find every selectable element at the cursor, top-to-bottom.
+          const stack = doc.elementsFromPoint
+            ? doc.elementsFromPoint(e.clientX, e.clientY).filter(el => isSelectable(el, doc))
+            : [];
+          if (stack.length > 1) {
+            // Same spot as last alt-click? advance index. Else start at 1
+            // (skip the topmost, since a regular click already gives them that).
+            const samePos = Math.abs(e.clientX - lastAltClick.x) < 6 &&
+                            Math.abs(e.clientY - lastAltClick.y) < 6;
+            const nextIdx = samePos
+              ? (lastAltClick.idx + 1) % stack.length
+              : 1;
+            target = stack[nextIdx];
+            lastAltClick = { x: e.clientX, y: e.clientY, idx: nextIdx };
+          }
+        } else {
+          lastAltClick = { x: -1, y: -1, idx: -1 };
+        }
+
         if (!isSelectable(target, doc)) return;
         e.preventDefault();
         e.stopPropagation();
@@ -645,6 +686,26 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 clearSelection();
                 return;
               }
+              if (actionId === 'prompt-change') {
+                // Route Prompt action to the main chat panel with an inline
+                // scope pill. ChatPanel inherits crawl data, model selection,
+                // history, and review surface.
+                const el = chain[chainIndex];
+                if (!el || !selectorPath || !onInlinePrompt) return;
+                const breadcrumb = chain
+                  .map(n => n.id ? `${n.tagName.toLowerCase()}#${n.id}` : n.tagName.toLowerCase())
+                  .join(' > ');
+                onInlinePrompt({
+                  path: selectorPath.join('.'),
+                  page: activePage,
+                  tag: el.tagName.toLowerCase(),
+                  outerHTML: el.outerHTML,
+                  breadcrumb,
+                });
+                // Keep the visual selection so the user has spatial reference
+                // while typing the prompt. Don't open the drawer panel.
+                return;
+              }
               setActiveAction(actionId);
             }}
             activeAction={activeAction}
@@ -680,22 +741,31 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                     mutator = (t) => { t.setAttribute('src', newPath); };
                   } else {
                     // Element with background-image — write an inline style
-                    // override. (Class/stylesheet-driven backgrounds get
-                    // overridden by inline; we accept the small style-attr
-                    // pollution for v1.)
+                    // override. Use !important so we win the cascade even
+                    // against class rules that themselves use !important
+                    // (common in design-system CSS). Also clean up any
+                    // existing inline background-image / background-shorthand
+                    // so we don't accumulate cruft on repeat replacements.
                     mutator = (t) => {
                       const prev = t.getAttribute('style') || '';
-                      const cleaned = prev.replace(/background-image\s*:\s*[^;]+;?\s*/gi, '').trim();
-                      const next = `${cleaned}${cleaned && !cleaned.endsWith(';') ? ';' : ''} background-image: url("${newPath}");`.trim();
+                      let cleaned = prev
+                        .replace(/background-image\s*:\s*[^;]+;?\s*/gi, '')
+                        // Strip 'background' shorthand too — it would set
+                        // background-image to none/initial without our knowing.
+                        .replace(/(^|;)\s*background\s*:\s*[^;]+;?/gi, '$1')
+                        .trim();
+                      if (cleaned && !cleaned.endsWith(';')) cleaned += ';';
+                      // CSS allows unquoted URLs and they survive HTML
+                      // attribute serialization cleanly. Quoting with " here
+                      // gets entity-encoded to &quot; during serialization,
+                      // which breaks rewriteUploadsUrls' downstream match.
+                      const next = `${cleaned}background-image: url(${newPath}) !important;`.trim();
                       t.setAttribute('style', next);
                     };
                   }
-                  // Path-based replace; fingerprint stays valid (no text/child changes).
                   updatedFingerprint = null;
                 } else if (payload.kind === 'svg') {
                   const newMarkup = payload.markup;
-                  // Parse the sanitized markup in the source-HTML doc and
-                  // swap it in for the existing <svg>.
                   mutator = (t, doc) => {
                     const tmp = doc.createElement('div');
                     tmp.innerHTML = newMarkup;
@@ -703,13 +773,11 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                     if (!fresh || fresh.tagName.toLowerCase() !== 'svg') return;
                     t.replaceWith(fresh);
                   };
-                  // The new SVG is a different DOM node; treat the selection
-                  // as having moved to the replacement (same path/position).
                   updatedFingerprint = {
                     tag: 'svg',
                     id: null,
                     textPrefix: '',
-                    childCount: 0, // we don't know without parsing — be lenient
+                    childCount: 0,
                   };
                 }
               }
@@ -779,7 +847,13 @@ function rewriteUploadsUrls(html, slug) {
   const base = `http://localhost:3001/api/projects/${slug}/uploads/`;
   let result = html.replace(/(src|href)=(['"])(?:\.\/)?uploads\/([^'"]+)\2/g,
     (_, attr, q, file) => `${attr}=${q}${base}${file}${q}`);
-  result = result.replace(/url\((['"]?)(?:\.\/)?uploads\/([^)'"\s]+)\1\)/g,
-    (_, q, file) => `url(${q}${base}${file}${q})`);
+  // Match url(...) with optional quote OR entity-encoded quote on either
+  // side. When inline styles are written via setAttribute and re-serialized,
+  // browsers encode inner double quotes as &quot; — which is not a quote
+  // character, so a naive [\'"] would miss the URL. We emit the rewritten
+  // URL unquoted (CSS accepts that) to sidestep the encoding issue entirely.
+  const DELIM = `(?:["']|&quot;|&apos;|&#34;|&#39;)?`;
+  const re = new RegExp(`url\\(\\s*${DELIM}(?:\\.\\/)?uploads\\/([^)\\s"'&]+)\\s*${DELIM}\\s*\\)`, 'g');
+  result = result.replace(re, (_, file) => `url(${base}${file})`);
   return result;
 }

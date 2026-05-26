@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, pickRandomArchetype, detectArchetypeInPrompt } from '../anthropic.js';
+import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, INLINE_MODE, pickRandomArchetype, detectArchetypeInPrompt } from '../anthropic.js';
 import { detectMissingPages, extractPlannedPages, parseFileBlocks } from '../parseFiles.js';
-import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions } from '../parsePatch.js';
+import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
 import { extractSearchTerms, evaluateImageIntent, buildImagePool, formatPoolForPrompt, cleanupUnusedImages, listExistingPool } from '../pixabay.js';
 
 const router = Router();
@@ -20,26 +20,34 @@ router.get('/:jobId', (req, res) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { model, messages, context } = req.body || {};
+    const { model, messages, context, inlineScope } = req.body || {};
     const currentPageCount = context?.currentPages ? Object.keys(context.currentPages).length : 0;
-    console.log(`[chat] POST received — model=${model} messages=${messages?.length} hasContext=${!!context} hasCrawledData=${!!context?.crawledData} currentPages=${currentPageCount}`);
+    console.log(`[chat] POST received — model=${model} messages=${messages?.length} hasContext=${!!context} hasCrawledData=${!!context?.crawledData} currentPages=${currentPageCount} inlineScope=${!!inlineScope}`);
     const client = getAnthropic();
     const resolvedModel = resolveModel(model);
     const jobId = randomUUID();
 
     const isFirstGeneration = !context?.currentPages || Object.keys(context.currentPages).length === 0;
+    const isInlineEdit = !!inlineScope && typeof inlineScope.path === 'string' && typeof inlineScope.page === 'string';
     let cachedSystem = SYSTEM_PROMPT;
     if (isFirstGeneration) cachedSystem += MULTI_PAGE_WORKFLOW;
+    if (isInlineEdit) cachedSystem += INLINE_MODE;
     if (context?.crawledData) {
       cachedSystem += `\n\n--- INTAKE DATA (crawled from ${context.crawledData.startUrl}) ---\n${JSON.stringify(context.crawledData, null, 2)}`;
     }
 
     let dynamicSystem = '';
 
+    // Inline-edit scope: tell the model exactly which element to modify.
+    if (isInlineEdit) {
+      const { path, page, outerHTML, tag, breadcrumb } = inlineScope;
+      dynamicSystem += `\n\n--- INLINE EDIT SCOPE ---\nThe user is editing a single <${tag || 'element'}> element.\n  page: ${page}\n  selectorPath: ${path}\n  breadcrumb: ${breadcrumb || '(unknown)'}\n\nCurrent element outerHTML:\n${outerHTML || '(missing)'}\n\nEmit exactly one INLINE block with header \`<!-- INLINE: ${path} in ${page} -->\` and a single replacement element whose root tag is <${tag}>. No FILE/EDIT/REGION/PATCH blocks this turn.`;
+    }
+
     // Inject a random layout archetype for first generations when the user
     // prompt doesn't already specify one. This gives the model a concrete
     // structural starting point instead of defaulting to the same pattern.
-    if (isFirstGeneration) {
+    if (isFirstGeneration && !isInlineEdit) {
       const userText = (messages || [])
         .filter(m => m.role === 'user')
         .map(m => typeof m.content === 'string' ? m.content : '')
@@ -233,7 +241,7 @@ router.post('/', async (req, res, next) => {
       // text doesn't match the current file (a known LLM failure mode), ask it
       // for a FULL FILE MODE rewrite of the failing file(s). One retry max — if
       // it still fails, the frontend surfaces the original patch error.
-      if (lastStopReason === 'end_turn' && clientConnected) {
+      if (lastStopReason === 'end_turn' && clientConnected && !isInlineEdit) {
         const currentPages = context?.currentPages || {};
         const { edits } = parsePatchBlocks(job.fullText);
         const regions = parseRegionBlocks(job.fullText);
@@ -275,7 +283,8 @@ router.post('/', async (req, res, next) => {
           const { files: newFiles } = parseFileBlocks(job.fullText);
           const regions = parseRegionBlocks(job.fullText);
           const { edits } = parsePatchBlocks(job.fullText);
-          const hasCodeChanges = Object.keys(newFiles).length > 0 || regions.length > 0 || Object.keys(edits).length > 0;
+          const inlines = parseInlineBlocks(job.fullText);
+          const hasCodeChanges = Object.keys(newFiles).length > 0 || regions.length > 0 || Object.keys(edits).length > 0 || inlines.length > 0;
 
           if (hasCodeChanges) {
             let mergedPages = { ...currentPages, ...newFiles };
@@ -284,6 +293,9 @@ router.post('/', async (req, res, next) => {
             }
             if (Object.keys(edits).length > 0) {
               mergedPages = applyPatches(mergedPages, edits).updatedPages;
+            }
+            if (inlines.length > 0) {
+              mergedPages = applyInlineBlocks(mergedPages, inlines).updatedPages;
             }
             const deleted = await cleanupUnusedImages(context.slug, mergedPages);
             const remaining = await listExistingPool(context.slug);

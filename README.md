@@ -27,10 +27,11 @@ Frontend is a single SPA. Each "tab" is a project. Generated HTML is rendered in
 ### Backend
 
 - `server.js` — Express setup, CORS, route mounting, port 3001.
-- `anthropic.js` — Claude SDK client, `MODELS` map, `SYSTEM_PROMPT`.
+- `anthropic.js` — Claude SDK client, `MODELS` map, `SYSTEM_PROMPT`, `MULTI_PAGE_WORKFLOW`, `INLINE_MODE` (system prompt extension for scoped single-element edits).
 - `storage.js` — filesystem CRUD for projects (read/write/list/rename/delete).
 - `crawler.js` — fetches a competitor URL with cheerio, extracts title/meta/headings/links/colors as intake data.
 - `parseFiles.js` — server-side parser for `<!-- FILE: -->` blocks (mirrored on frontend).
+- `parsePatch.js` — server-side mirrors of frontend patch helpers: `parsePatchBlocks`/`applyPatches`, `parseRegionBlocks`/`applyRegions`, **`parseInlineBlocks`/`applyInlineBlocks`** (uses cheerio for DOM-level inline edits). Kept in sync with the frontend so the orchestrator can detect failures and trigger recovery.
 - `pixabay.js` — Pixabay API client: search, download, term extraction (via Haiku), pool building, and cleanup of unused images.
 - `routes/`:
   - `projects.js` — CRUD: list, get, create, rename, delete, save.
@@ -38,8 +39,13 @@ Frontend is a single SPA. Each "tab" is a project. Generated HTML is rendered in
   - `crawl.js` — POST a URL, returns structured intake data.
   - `export.js` — extracts CSS into external stylesheets, copies assets/favicons, writes the export bundle to disk. Cleans up unused Pixabay images before copying. No API call — purely local.
   - `import.js` — accepts a zip, creates a project from it (backend kept as reference; UI removed).
-  - `uploads.js` — image upload + serve (sanitized filenames, suffix collision avoidance).
-  - `pixabay.js` — proxy routes for Pixabay search and download (keeps API key server-side; scaffolded for future image tooltip feature).
+  - `uploads.js` — image upload + serve (sanitized filenames, suffix collision avoidance). Also used by the inline-edit Replace visual upload flow.
+  - `pixabay.js` — proxy routes for Pixabay search and download (keeps API key server-side).
+  - `inline.js` — backend routes for the inline-edit toolbar's standalone actions:
+    - `POST /api/inline/rewrite-text` — Haiku-driven plain-text rewrite for a snippet.
+    - `POST /api/inline/generate-svg` — Sonnet 4.6 SVG generation for the Replace SVG flow; output is constrained to a single `<svg>` element with strict style conventions.
+    - `GET /api/inline/pixabay-search?q=` — live Pixabay search for the Replace BG/IMG drawer.
+    - `POST /api/inline/download-pixabay` — downloads a chosen Pixabay hit into the project's `uploads/` dir using the `pb-` prefix convention.
   - `appState.js` — persists open tabs / active tab in `app-state.json`.
 
 ### Frontend
@@ -47,16 +53,26 @@ Frontend is a single SPA. Each "tab" is a project. Generated HTML is rendered in
 - `App.jsx` — root, tab/project state, project list, project routing.
 - `api.js` — fetch wrappers + `streamChat` (SSE reader). Returns `{ text, usage, stopReason }`.
 - `parseFiles.js` — extracts `<!-- FILE: name.html -->` blocks. Splits trailing prose off file content at `</html>` so commentary after a file doesn't contaminate the saved HTML. Also exports `isCompleteHtmlDoc()` (requires `<body` and ends with `</html>`).
-- `parsePatch.js` — extracts `<!-- EDIT: name -->` headers and SEARCH/REPLACE blocks; `applyPatches()` does byte-exact matching against current files (with a whitespace-tolerant fallback).
+- `parsePatch.js` — extracts `<!-- EDIT: name -->` SEARCH/REPLACE blocks (`applyPatches`), `<!-- REGION: -->` blocks (`applyRegions`), and `<!-- INLINE: <path> in <page> -->` blocks (`applyInlineBlocks` — DOM-level swap via `DOMParser` and nth-child selector path).
 - `tokenRewriter.js` — parses and rewrites `:root { --token: value }` blocks across all pages.
 - `themePresets.js` — color / font / sizing / spacing / radius preset definitions.
 - `colorUtils.js` — hex/HSL math for theme generation.
 - `components/`
-  - `ProjectView.jsx` — wires together ChatPanel + PreviewPanel for one project.
-  - `ChatPanel.jsx` — chat input, model picker, streaming display, attachment handling, response parsing, persistence. **This is where most of the response handling lives.**
-  - `PreviewPanel.jsx` — iframe preview at mobile/tablet/desktop widths, page dropdown, Tools button, export.
+  - `ProjectView.jsx` — wires together ChatPanel + PreviewPanel for one project. Owns `inlineScope` state (used to route the inline-edit Prompt action into the chat input).
+  - `ChatPanel.jsx` — chat input, model picker, streaming display, attachment handling, response parsing, persistence. **This is where most of the response handling lives.** Also renders the inline-edit scope pill, applies returned INLINE blocks, and shows chips on user messages that were scoped.
+  - `PreviewPanel.jsx` — iframe preview at mobile/tablet/desktop widths, page dropdown, Tools button, export, and the inline-edit Select toggle. Owns all selection state and overlays.
+  - `SelectionToolbar.jsx` — floating toolbar that anchors to the selected element. Breadcrumb climb, ambient CSS-spec readout, and the filtered action buttons (Replace / Edit text / Rewrite / Prompt / Remove).
+  - `SelectionPanel.jsx` — lower-right floating drawer that dispatches to one of the action sub-panels.
+  - `inlinePanels/` — one component per drawer action: `EditTextPanel`, `RewriteTextPanel`, `ReplaceVisualPanel` (Pixabay + upload for image/bg; prompt + upload + paste for SVG).
   - `ToolsMenu.jsx` — applies theme presets by rewriting `:root` tokens across all pages without re-running the model.
   - `TabBar.jsx`, `NewTabView.jsx`, `ExportModal.jsx`, `Spinner.jsx` — UI primitives.
+- `inlineEdit/`
+  - `selectionUtils.js` — selector-path resolve (nth-child indices from `<body>`), element classifier, identity fingerprint (used to detect when an external edit invalidates the saved selection).
+  - `commit.js` — shared "parse source HTML → resolve path → run mutator → re-serialize" pipeline used by all standalone inline actions (Remove, Edit text, Rewrite, Replace visual).
+  - `svgSanitize.js` — parses SVG markup, validates single `<svg>` root, strips `<script>`, `<foreignObject>`, on-handlers, `javascript:` URLs.
+  - `htmlSanitize.js` — same idea for arbitrary HTML fragments returned by the prompt-change action (single root, tag-match, strip scripts/iframes/on-handlers).
+  - `icons.jsx` — single-color SVG icons for the toolbar.
+  - `specs.js` — computed-style readout for the toolbar (font/size/weight/color, w×h, padding, margin, background, border, radius).
 
 ---
 
@@ -135,7 +151,7 @@ The endpoint streams Anthropic SSE deltas back to the client and emits a final `
 
 ## Generation & edit protocol
 
-The model picks one of two output modes per response.
+The model picks one of three output modes per response (FULL FILE, PATCH, INLINE).
 
 ### FULL FILE mode
 
@@ -165,6 +181,17 @@ Used for first generation, new pages, or "more than ~50% structural change." Eac
 Used for iterations: copy edits, color tweaks, list changes, theme/restyle (rewrite `:root` tokens), single-section swaps. SEARCH must be byte-exact against the current file. Multiple SEARCH/REPLACE pairs per file allowed; multiple files per response allowed. Parsed and applied by `frontend/src/parsePatch.js`. Failures surface as a "Patch failed for: …" system message.
 
 The system prompt explicitly forbids re-emitting unrelated sibling pages just to "stay in sync" — shared `:root` tokens already do that, and re-emitting risks truncation that wipes out an existing page.
+
+### INLINE mode
+
+```
+<!-- INLINE: 1.2.0 in index.html -->
+<section class="hero" id="home">...</section>
+```
+
+Used **only** when the chat request carries an `inlineScope` (the user clicked the Prompt action in the inline-edit toolbar). The header carries a dot-joined nth-child selector path from `<body>` and the target filename. The body is exactly one replacement element with the same root tag as the original.
+
+Mutually exclusive with FILE/PATCH/REGION for that turn — the system prompt enforces this and PATCH-mode auto-recovery is skipped for inline-scoped turns. Parsed by `parseInlineBlocks` and applied by `applyInlineBlocks` (DOM-level swap; either the path + tag resolve or the apply fails loudly with a system message).
 
 ---
 
@@ -220,6 +247,83 @@ When "Original" is selected, the stored `__googleFonts` query is used to restore
 - **Spacing** also uses snapshot-relative multipliers (Compact: 0.6×, Comfortable: 1.0×, Roomy: 1.5×) via `buildSpacingTokens()`.
 
 This is why the system prompt is so strict about "no hardcoded brand colors / fonts / major spacing outside `:root`" — anything hardcoded is locked and the Tools menu can't swap it.
+
+---
+
+## Inline-edit toolbar
+
+A click-to-edit overlay on the design preview. Lets the user point at any element in the iframe and run targeted actions on it without round-tripping through chat for every small change.
+
+### UX
+
+1. Toggle **Select** in the preview toolbar to enter selection mode.
+2. Hover over the design — elements highlight under the cursor (dashed outline).
+3. Click an element to select it (solid outline, floating toolbar appears).
+4. **Option-click** (Alt+click) digs through z-stacked layers — repeat at the same spot to cycle deeper. Necessary for reaching elements under gradient overlays or behind `pointer-events:none` decorative siblings.
+5. While Select mode is on, `pointer-events: auto !important` is forced on every element in the iframe so previously-unreachable overlays/backgrounds can be selected.
+
+### Toolbar anatomy
+
+- **Breadcrumb** — `tag` or `tag#id` chips from outermost ancestor down to the clicked element. Click any chip to climb the chain. Capped at 4 visible with a leading `…` ellipsis when deeper.
+- **CSS specs readout** — vertical CSS-like display of computed styles (font family/size/weight/color, w×h, padding, margin, background, border, radius). Font block hides when the element has no own text content.
+- **Action buttons** — filtered by element type:
+  - **Replace** (img / bg-image / svg) — opens the Replace visual drawer. Label adapts: "Replace IMG", "Replace BG", "Replace SVG".
+  - **Edit text** (text-leaf elements only) — manual textarea, replaces `textContent`.
+  - **Rewrite** (text-leaf elements only) — AI-powered, Haiku 4.5, plain text only.
+  - **Prompt** — universal, hidden for SVG (Replace SVG already has a prompt). Routes through the main chat panel.
+  - **Remove** — universal. Native `confirm()` before commit.
+
+A "text-leaf" element is one whose own textContent is non-empty AND whose children (if any) are all inline-formatting tags (`<span>`, `<strong>`, `<em>`, `<a>`, etc.). This catches `<div>One-line label</div>` while excluding block containers like `<section>` or `<div class="card">…blocks…</div>`.
+
+### How edits commit
+
+Every standalone action (Remove, Edit text, Rewrite, Replace visual) flows through `inlineEdit/commit.js`:
+
+1. Parse the **saved source HTML** for the active page (not the live iframe DOM — that contains runtime injections like our overlay divs and token-override inline styles).
+2. Resolve the selector path (dot-joined nth-child indices from `<body>`).
+3. Run a mutator function on the parsed target node.
+4. Re-serialize and push through `onApplyTokens` — the same path chat edits use, so **undo/redo work for free** via the existing history snapshot system.
+
+### Selection identity (fingerprinting)
+
+When the user selects an element, a fingerprint is captured (tag, id, text prefix, child count). After any iframe re-render (chat edit, undo, redo, our own commit), the install effect:
+
+1. Re-resolves the selector path against the new DOM.
+2. Verifies the resolved element matches the fingerprint.
+3. If it doesn't (e.g. chat removed the ancestor and the path now lands on a sibling) — selection clears cleanly instead of leaving the toolbar anchored to a wrong element.
+
+This is critical because nth-child paths can accidentally resolve to a different element if siblings were removed above the selection — without the fingerprint check, the toolbar would silently re-anchor to the wrong place.
+
+### Prompt action: chat integration
+
+Unlike the other actions, **Prompt routes through the main chat panel** instead of opening a drawer. This is so the model inherits:
+
+- Full crawl data (business name, services, tone) — solves the "model generates generic tech hero" problem.
+- Active model selection (Sonnet / Opus / Haiku).
+- Conversation history.
+- Streaming, stop, job-recovery infrastructure.
+
+Flow:
+
+1. User clicks Prompt → `PreviewPanel` calls `onInlinePrompt({ path, page, tag, outerHTML, breadcrumb })`.
+2. `ProjectView` stores `inlineScope` and (if collapsed) auto-expands the chat panel.
+3. `ChatPanel` renders a pill above the textarea: "Prompting for: section > div > h2".
+4. User types the instruction, hits Send. Scope is snapshotted, then immediately cleared from parent state — the pill goes away, the user message gets a chip showing the scope was applied.
+5. `streamChat` sends `inlineScope` in the request body. Backend appends `INLINE_MODE` to the system prompt + a "INLINE EDIT SCOPE" dynamic context block.
+6. Model returns prose + a single `<!-- INLINE: <path> in <page> -->` block with the replacement element.
+7. `applyResult` parses the INLINE block (`parseInlineBlocks` + `applyInlineBlocks`) and applies it through normal save/persist.
+
+### Safety / validation
+
+- **HTML fragments from the model** (prompt-change, replace-visual SVG) run through `htmlSanitize.js` / `svgSanitize.js`: must parse cleanly, must have a single root, root tag must match the original. `<script>`, `<iframe>`, `<object>`, `<embed>`, `<foreignObject>`, `on*` attributes, and `javascript:` URLs are silently stripped.
+- **INLINE block parsing** terminates only at our marker comments (`INLINE:`, `FILE:`, `EDIT:`, `REGION:`, `PAGES:`), never at arbitrary `<!-- … -->` — the element body itself may contain HTML comments (common inside SVGs).
+
+### Known limitations (v1)
+
+- **CSS rule edits are not possible inline.** The model only sees the element's outerHTML, not the page stylesheet. For visual changes it falls back to inline `style="…"` overrides — functional but accumulates style-attr cruft over many edits. For cross-cutting CSS changes, use the main chat.
+- **`background-image` from `::before`/`::after` pseudo-elements** can't be replaced — inline style on the element doesn't reach pseudo-element CSS.
+- **Background-image replacement** writes `style="background-image: url(...) !important"` to win the cascade even against class rules using `!important`. The override is unquoted (`url(uploads/foo.jpg)`) so HTML serialization doesn't entity-encode the quotes and break the downstream `rewriteUploadsUrls` pass.
+- **Pixabay-downloaded images** for inline replacements persist in `uploads/` until the next chat turn runs `cleanupUnusedImages` — consistent with chat-driven image swaps. Once cleaned, the previous image's history snapshot still references a missing file.
 
 ---
 
@@ -287,13 +391,15 @@ Replaces `placehold.co` placeholders with real stock photos from Pixabay. Requir
 
 For reference, here's what happens on a chat send:
 
-1. User types in `ChatPanel`. Attachments encoded into structured `messages` content blocks (text + image/file references).
-2. `streamChat` POSTs to `/api/chat`. Backend builds split system blocks.
+1. User types in `ChatPanel`. Attachments encoded into structured `messages` content blocks (text + image/file references). If the user clicked the inline-edit Prompt action, the chat input also carries an `inlineScope` describing the target element.
+2. `streamChat` POSTs to `/api/chat` with `{ model, messages, context, inlineScope }`. Backend builds split system blocks: cached (`SYSTEM_PROMPT` + `MULTI_PAGE_WORKFLOW` for first gen + `INLINE_MODE` when scoped + crawled intake) and dynamic (image pool / archetype / current files / inline-scope details).
 3. If Pixabay is configured and a search is needed (first gen or image keywords in prompt): extract search terms via Haiku, search Pixabay, download images to `uploads/`, inject pool into prompt. A `preparingImages` SSE event triggers the "Preparing images…" indicator in the UI.
 4. Backend opens an Anthropic stream. Frontend renders a spinner during streaming (model prose commentary is hidden until the final message).
-5. On `done`: parse PATCH blocks first (`parsePatchBlocks`), then FILE blocks (`parseFileBlocks`). Apply patches to `pages`, merge any complete FILE blocks. Reject incomplete files. Surface system messages for any failures or truncation.
-6. Post-generation: cleanup unused `pb-*` images from `uploads/`.
+5. On `done`: parse REGION blocks, then INLINE blocks (`parseInlineBlocks`), then PATCH blocks (`parsePatchBlocks`), then FILE blocks (`parseFileBlocks`). INLINE blocks are stripped before the file/patch parsers run (their bodies may contain HTML the file parser would otherwise grab). Apply each in order; reject incomplete files; surface system messages for any failures or truncation.
+6. Post-generation: cleanup unused `pb-*` images from `uploads/` (signal is "any code-changing block emitted" — FILE, EDIT, REGION, or INLINE).
 7. Persist updated `pages` + appended messages + `modelHistory` entry via `PUT /api/projects/{slug}`. Storage writes a history snapshot.
+
+Inline-edit standalone actions (Remove / Edit text / Rewrite / Replace visual) bypass step 2 — they mutate the saved source HTML directly via `inlineEdit/commit.js` and push through `onApplyTokens`, which lands in step 7 with the same history-snapshot guarantees.
 
 ---
 

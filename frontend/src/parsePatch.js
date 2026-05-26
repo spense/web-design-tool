@@ -278,3 +278,77 @@ function replaceFirstElement(html, tag, newContent) {
   }
   return null;
 }
+
+// ─── INLINE blocks (mirror of backend/parsePatch.js INLINE helpers) ────────
+
+const INLINE_HEADER_RE = /<!--\s*INLINE:\s*([0-9.]+)\s+in\s+([^\s>]+)\s*-->/gi;
+// Only OUR marker comments terminate an INLINE block. Arbitrary HTML comments
+// inside the element body (e.g. inside an SVG) must not terminate it early.
+const MARKER_RE = /<!--\s*(?:INLINE|FILE|EDIT|REGION|PAGES):/gi;
+
+export function parseInlineBlocks(text) {
+  const headers = [];
+  INLINE_HEADER_RE.lastIndex = 0;
+  let m;
+  while ((m = INLINE_HEADER_RE.exec(text)) !== null) {
+    headers.push({
+      path: m[1].trim(),
+      filename: m[2].trim(),
+      contentStart: m.index + m[0].length,
+    });
+  }
+  if (headers.length === 0) return [];
+
+  const blocks = [];
+  for (let i = 0; i < headers.length; i++) {
+    const start = headers[i].contentStart;
+    MARKER_RE.lastIndex = start;
+    const next = MARKER_RE.exec(text);
+    const end = next ? next.index : text.length;
+    const markup = text.slice(start, end).trim();
+    blocks.push({ path: headers[i].path, filename: headers[i].filename, markup });
+  }
+  return blocks;
+}
+
+// Apply a single INLINE block to a page's HTML string. Returns null on any
+// of: path doesn't resolve, markup has zero/multiple roots, root tag mismatch.
+export function applyInlineToPage(pageHtml, path, newMarkup) {
+  if (!pageHtml || !path) return null;
+  const doc = new DOMParser().parseFromString(pageHtml, 'text/html');
+  if (!doc?.body) return null;
+
+  const indices = path.split('.').map(Number);
+  if (indices.some(n => Number.isNaN(n))) return null;
+  let node = doc.body;
+  for (const idx of indices) {
+    if (!node?.children?.[idx]) return null;
+    node = node.children[idx];
+  }
+  const tmp = document.createElement('div');
+  tmp.innerHTML = newMarkup;
+  const roots = Array.from(tmp.children);
+  if (roots.length !== 1) return null;
+  const fresh = roots[0];
+  if (fresh.tagName !== node.tagName) return null;
+
+  node.replaceWith(fresh);
+  const m = pageHtml.match(/^\s*(<!doctype[^>]*>)/i);
+  const doctype = m ? m[1] : '<!DOCTYPE html>';
+  return `${doctype}\n${doc.documentElement.outerHTML}`;
+}
+
+export function applyInlineBlocks(currentPages, blocks) {
+  const updatedPages = { ...currentPages };
+  const applied = [];
+  const failed = [];
+  for (const b of blocks) {
+    const src = updatedPages[b.filename];
+    if (!src) { failed.push({ ...b, reason: 'not_found' }); continue; }
+    const next = applyInlineToPage(src, b.path, b.markup);
+    if (next == null) { failed.push({ ...b, reason: 'no_match_or_tag' }); continue; }
+    updatedPages[b.filename] = next;
+    applied.push({ filename: b.filename, path: b.path });
+  }
+  return { updatedPages, applied, failed };
+}

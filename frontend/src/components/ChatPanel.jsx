@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { streamChat, pollJobResult, api } from '../api.js';
 import { parseFileBlocks, detectUrl, isCompleteHtmlDoc } from '../parseFiles.js';
-import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, editStartIndex } from '../parsePatch.js';
+import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, editStartIndex, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
 import Spinner from './Spinner.jsx';
 
 const MODELS = [
@@ -19,7 +19,7 @@ function formatDuration(secs) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-export default function ChatPanel({ project, pages, messages, activePage, onUpdate, hasApiKey, onStreamingChange }) {
+export default function ChatPanel({ project, pages, messages, activePage, onUpdate, hasApiKey, onStreamingChange, inlineScope, onClearInlineScope }) {
   const [input, setInput] = useState('');
   const [model, setModel] = useState(project.lastModel || 'sonnet');
   const [streaming, setStreaming] = useState(false);
@@ -49,9 +49,13 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     const regions = parseRegionBlocks(fullText);
     // Strip REGION blocks before running other parsers so they don't leak into prose.
     const textWithoutRegions = fullText.replace(/<!--\s*REGION:[\s\S]*?<!--\s*\/REGION\s*-->/gi, '');
-    const { edits, prose: patchProse } = parsePatchBlocks(textWithoutRegions);
+    const inlines = parseInlineBlocks(textWithoutRegions);
+    // Strip INLINE blocks (header + body up to next comment / end) so they
+    // don't leak into the prose parsers below.
+    const textWithoutInlines = stripInlineBlocks(textWithoutRegions);
+    const { edits, prose: patchProse } = parsePatchBlocks(textWithoutInlines);
     const editFiles = Object.keys(edits);
-    const { files, prose: fileProse } = parseFileBlocks(textWithoutRegions);
+    const { files, prose: fileProse } = parseFileBlocks(textWithoutInlines);
 
     const rejectedFiles = [];
     const safeFiles = {};
@@ -141,10 +145,29 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       if (wroteUpdated.length) appliedSummary.push(`rewrote: ${wroteUpdated.join(', ')}`);
     }
 
+    if (inlines.length > 0) {
+      const inlineResult = applyInlineBlocks(updatedPages, inlines);
+      updatedPages = inlineResult.updatedPages;
+      for (const app of inlineResult.applied) {
+        appliedSummary.push(`${app.filename} (inline @ ${app.path})`);
+      }
+      if (inlineResult.failed.length > 0) {
+        const lines = inlineResult.failed.map(f => {
+          if (f.reason === 'not_found') return `  • ${f.filename}: file not found`;
+          return `  • ${f.filename} @ ${f.path}: element not found or tag mismatch`;
+        }).join('\n');
+        failureMessages.push({
+          role: 'system',
+          content: `Inline edit failed for:\n${lines}\n\nThe element may have shifted since you opened the prompt. Try selecting again.`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
     const prose = editFiles.length > 0 ? patchProse : fileProse;
     let displayContent = prose;
     if (!displayContent) {
-      const didSomething = editFiles.length > 0 || fileNames.length > 0 || regions.length > 0;
+      const didSomething = editFiles.length > 0 || fileNames.length > 0 || regions.length > 0 || inlines.length > 0;
       displayContent = didSomething
         ? (Object.keys(pages).length > 0 ? 'Design updated.' : 'Design generated.')
         : '(empty response)';
@@ -350,7 +373,19 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       ? `${text}\n\n[Attached: ${attachments.map(a => a.name).join(', ')}]`
       : text;
 
-    const userMsg = { role: 'user', content: savedContent, model, timestamp: new Date().toISOString() };
+    // Snapshot scope at send time, then immediately clear so the pill goes
+    // away while the request is in flight. The chip on the user message
+    // takes over as the visual indicator.
+    const sendScope = inlineScope || null;
+    if (sendScope && onClearInlineScope) onClearInlineScope();
+
+    const userMsg = {
+      role: 'user',
+      content: savedContent,
+      model,
+      timestamp: new Date().toISOString(),
+      ...(sendScope ? { inlineScope: { breadcrumb: sendScope.breadcrumb, page: sendScope.page } } : {}),
+    };
     const newMessages = [...messages];
     if (crawlMessage) newMessages.push(crawlMessage);
     newMessages.push(userMsg);
@@ -394,6 +429,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           activePage,
           currentPages: pages,
         },
+        inlineScope: sendScope,
         onDelta: (_d, full) => setStreamingText(full),
         onPreparingImages: (data) => setImagePoolStatus(data),
         onJobId: (jid) => {
@@ -478,6 +514,20 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
         )}
       </div>
       <div className="chat-input">
+        {inlineScope && (
+          <div className="chat-inline-scope" title={inlineScope.breadcrumb}>
+            <span className="scope-label">Prompting for:</span>
+            <code className="scope-bc">{inlineScope.breadcrumb}</code>
+            <button
+              className="scope-clear"
+              type="button"
+              onClick={onClearInlineScope}
+              disabled={streaming}
+              aria-label="Clear inline scope"
+              title="Cancel inline scope"
+            >×</button>
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="chat-attachments">
             {attachments.map(a => (
@@ -618,6 +668,11 @@ function Message({ msg }) {
         {msg.role}{msg.model ? ` · ${MODEL_LABELS[msg.model] || msg.model}` : ''}
         {msg.duration != null ? ` (${formatDuration(msg.duration)})` : ''}
       </div>
+      {msg.inlineScope && (
+        <div className="msg-inline-chip" title={msg.inlineScope.breadcrumb}>
+          ↳ inline: <code>{msg.inlineScope.breadcrumb}</code>
+        </div>
+      )}
       <div className={`body${msg.kind === 'stopped' ? ' stopped' : ''}`}>{msg.content}</div>
       {msg.files?.length > 0 && (
         <div className="crawl-info">Updated: {msg.files.join(', ')}</div>
@@ -713,4 +768,26 @@ function readAsText(file) {
 function truncateName(name, max = 40) {
   if (name.length <= max) return name;
   return name.slice(0, max - 3) + '…';
+}
+
+// Remove INLINE block headers + their element bodies from `text` so the
+// FILE/PATCH/REGION parsers don't accidentally pick up text inside them.
+// The body ends at the next OUR-style marker (INLINE/FILE/EDIT/REGION/PAGES)
+// — NOT at any HTML comment, since the element body itself may contain
+// `<!-- ... -->` comments (common inside SVG/HTML).
+function stripInlineBlocks(text) {
+  const head = /<!--\s*INLINE:\s*[0-9.]+\s+in\s+[^\s>]+\s*-->/gi;
+  const markerRe = /<!--\s*(?:INLINE|FILE|EDIT|REGION|PAGES):/gi;
+  let result = '';
+  let pos = 0;
+  let m;
+  while ((m = head.exec(text)) !== null) {
+    result += text.slice(pos, m.index);
+    const bodyStart = m.index + m[0].length;
+    markerRe.lastIndex = bodyStart;
+    const next = markerRe.exec(text);
+    pos = next ? next.index : text.length;
+  }
+  result += text.slice(pos);
+  return result;
 }
