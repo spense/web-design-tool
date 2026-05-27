@@ -63,7 +63,14 @@ router.post('/', async (req, res, next) => {
       dynamicSystem += `\n\n--- ACTIVE CONTEXT ---\nThe user is currently viewing "${context.activePage}" in the design preview. If they ask for changes without specifying a page, assume they mean this page.`;
     }
     if (context?.currentPages && Object.keys(context.currentPages).length > 0) {
-      dynamicSystem += `\n\n--- CURRENT DESIGN ---\nThe project currently contains these files: ${Object.keys(context.currentPages).join(', ')}.\nWhen iterating with PATCH MODE, your SEARCH blocks must be byte-exact matches against the file contents below.\n`;
+      if (isInlineEdit) {
+        // In inline mode the model can only emit an INLINE block for the scoped
+        // element. Label the file dump as read-only reference so the model uses
+        // it to match design tokens / voice rather than trying to PATCH it.
+        dynamicSystem += `\n\n--- DESIGN REFERENCE (read-only) ---\nThe project currently contains these files: ${Object.keys(context.currentPages).join(', ')}. The contents are shown for reference ONLY — to help you match the surrounding design tokens, fonts, and content style. Do NOT emit EDIT/PATCH/REGION/FILE blocks against these files this turn; the runtime will drop them.\n`;
+      } else {
+        dynamicSystem += `\n\n--- CURRENT DESIGN ---\nThe project currently contains these files: ${Object.keys(context.currentPages).join(', ')}.\nWhen iterating with PATCH MODE, your SEARCH blocks must be byte-exact matches against the file contents below.\n`;
+      }
       for (const [name, content] of Object.entries(context.currentPages)) {
         dynamicSystem += `\n<!-- CURRENT FILE: ${name} -->\n${content}\n`;
       }
@@ -87,6 +94,9 @@ router.post('/', async (req, res, next) => {
     };
 
     // Pixabay image pool: search and download before generation starts.
+    // `searchedThisTurn` tracks whether this turn actually triggered a new
+    // image search — used below to decide whether to report imageStats.
+    let searchedThisTurn = false;
     if (process.env.PIXABAY_API_KEY && context?.slug) {
       try {
         const lastUserMsg = [...(messages || [])].reverse().find(m => m.role === 'user');
@@ -105,12 +115,15 @@ router.post('/', async (req, res, next) => {
         // two-stage filter: a cheap regex pre-filter catches image-adjacent
         // words, then Haiku makes the smart YES/NO call on whether the user
         // actually wants NEW images (vs layout changes like "move the image").
-        // Skip entirely when user has attachments (their own images).
-        const maybeAboutImages = !hasAttachments && /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|unsplash|pixabay)\b/i.test(lastUserText);
+        // Skip entirely when user has attachments (their own images), and
+        // skip entirely for inline edits (scoped to one element — not a pool-
+        // populating moment).
+        const maybeAboutImages = !hasAttachments && !isInlineEdit && /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|unsplash|pixabay)\b/i.test(lastUserText);
         let needsNewImages = false;
 
         if (isFirstGeneration) {
           needsNewImages = true;
+          searchedThisTurn = true;
           safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
           const searchTerms = await extractSearchTerms(context.crawledData, lastUserText);
           console.log(`[chat] pixabay search terms: ${searchTerms.join(', ')}`);
@@ -125,6 +138,7 @@ router.post('/', async (req, res, next) => {
           const intent = await evaluateImageIntent(context.crawledData, lastUserText);
           needsNewImages = intent.needsImages;
           if (needsNewImages && intent.terms.length > 0) {
+            searchedThisTurn = true;
             safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
             console.log(`[chat] pixabay search terms (intent): ${intent.terms.join(', ')}`);
             const pool = await buildImagePool(context.slug, intent.terms);
@@ -276,6 +290,13 @@ router.post('/', async (req, res, next) => {
       // Only run cleanup and report stats when the model actually emitted code
       // changes (FILE/PATCH/REGION blocks). Prose-only responses shouldn't
       // trigger cleanup or show misleading "Used X images" stats.
+      //
+      // Report imageStats ONLY when this turn actually did image work:
+      //   - searchedThisTurn: we ran a Pixabay search and the pool grew, OR
+      //   - deleted.length > 0: cleanup actually orphaned + removed images.
+      // Otherwise the line "Used N images. Discarded 0" is just noise on
+      // every chat turn (notably misleading for inline edits that don't
+      // touch images at all).
       let imageStats = null;
       if (process.env.PIXABAY_API_KEY && context?.slug) {
         try {
@@ -298,8 +319,8 @@ router.post('/', async (req, res, next) => {
               mergedPages = applyInlineBlocks(mergedPages, inlines).updatedPages;
             }
             const deleted = await cleanupUnusedImages(context.slug, mergedPages);
-            const remaining = await listExistingPool(context.slug);
-            if (remaining.length > 0 || deleted.length > 0) {
+            if (searchedThisTurn || deleted.length > 0) {
+              const remaining = await listExistingPool(context.slug);
               imageStats = { used: remaining.length, discarded: deleted.length };
             }
           }

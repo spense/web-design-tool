@@ -394,11 +394,13 @@ export const INLINE_MODE = `
 
 The user is editing ONE specific element using the inline-edit toolbar in the design preview. They are NOT asking for a page-wide change. The runtime will inject the element's location, current outerHTML, and root tag below.
 
+**STRICT RULE — the runtime enforces this server-side:** the ONLY block type that will be applied this turn is an \`<!-- INLINE: ... -->\` block. If you emit FILE, EDIT, REGION, or PATCH blocks, they will be DROPPED and the user will be told to switch to main chat. Do not try to "fix it in the stylesheet" with EDIT blocks — that will be rejected.
+
 For this turn, you must:
 
 1. Output ONE \`<!-- INLINE: <selectorPath> in <page> -->\` block containing the complete modified element. Nothing else.
 2. The block contents must be EXACTLY ONE root element. The root tag MUST stay the same as the original (e.g. <h2> stays <h2>, <section> stays <section>).
-3. Do NOT use FILE, EDIT, REGION, or PATCH modes for this turn. Do NOT emit unrelated changes. The user's request applies ONLY to the scoped element.
+3. NEVER use FILE, EDIT, REGION, or PATCH modes for this turn — the runtime will drop them. The user's request applies ONLY to the scoped element.
 4. Do NOT add sibling elements alongside the target. If the user asks to "replace" something, replace IT — don't add a new copy next to it.
 5. Format:
 \`\`\`
@@ -408,12 +410,21 @@ Brief commentary (one line is fine).
 <h2 class="hero-title">…</h2>
 \`\`\`
 6. The selectorPath and filename you emit must match the ones the runtime tells you below — copy them exactly.
-7. CSS limitation: you only see the element's outerHTML, not the page stylesheet. For visual changes (colors, borders, padding) emit an inline \`style="…"\` override. Don't try to modify class CSS — you can't see it.
-8. Use the project's existing crawl data (business name, services, tone) to make the content actually relevant. Don't generate generic placeholder copy.
-9. Match the surrounding design system's apparent style — utility classes, CSS variables, etc.
-10. Never include \`<script>\`, \`<iframe>\`, \`<object>\`, \`<embed>\`, \`<foreignObject>\`, or any \`on*\` event-handler attributes. The runtime sanitizes these but it's bad form to emit them.
+7. CSS limitation: you only see the element's outerHTML, not the page stylesheet. For visual changes (colors, borders, padding) emit an inline \`style="…"\` override. Don't try to modify class CSS — you can't see it and EDIT blocks would be rejected anyway.
+8. The \`--- CURRENT DESIGN ---\` and \`--- INTAKE DATA ---\` sections below are READ-ONLY REFERENCE — they exist so your replacement matches the surrounding design tokens, voice, and content. Do not emit edits against them.
+9. Use the project's existing crawl data (business name, services, tone) to make the content actually relevant. Don't generate generic placeholder copy.
+10. Match the surrounding design system's apparent style — utility classes, CSS variables, etc.
+11. Never include \`<script>\`, \`<iframe>\`, \`<object>\`, \`<embed>\`, \`<foreignObject>\`, or any \`on*\` event-handler attributes. The runtime sanitizes these but it's bad form to emit them.
 
-If the request fundamentally requires touching multiple elements or page-wide CSS (e.g. "change the site's primary color"), say so briefly and ask the user to use the main chat instead — don't emit an INLINE block in that case.`;
+## When the request can't be done with INLINE alone
+
+Some requests genuinely require stylesheet edits or page-wide changes:
+- Adding \`@media\` queries / responsive breakpoints (media rules can't live in inline \`style=""\`)
+- Changing :root design tokens
+- Modifying class-based CSS rules in the page \`<style>\` block
+- Touching multiple elements across the page
+
+For those, DO NOT emit an INLINE block (it would either be a no-op or change the wrong thing). Instead, briefly tell the user what's needed and ask them to clear the inline selection and resend in main chat. Example: "This needs an \`@media\` breakpoint in the page stylesheet, which inline mode can't touch. Clear the inline selection (the chip below the chat input) and resend the same prompt — I'll patch the stylesheet from there."`;
 
 // Layout archetypes for random injection when the user prompt doesn't specify one.
 export const LAYOUT_ARCHETYPES = [

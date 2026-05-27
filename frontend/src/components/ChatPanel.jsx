@@ -46,16 +46,37 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     const usage = result.usage;
     const truncated = result.stopReason === 'max_tokens';
 
-    const regions = parseRegionBlocks(fullText);
+    let regions = parseRegionBlocks(fullText);
     // Strip REGION blocks before running other parsers so they don't leak into prose.
     const textWithoutRegions = fullText.replace(/<!--\s*REGION:[\s\S]*?<!--\s*\/REGION\s*-->/gi, '');
     const inlines = parseInlineBlocks(textWithoutRegions);
     // Strip INLINE blocks (header + body up to next comment / end) so they
     // don't leak into the prose parsers below.
     const textWithoutInlines = stripInlineBlocks(textWithoutRegions);
-    const { edits, prose: patchProse } = parsePatchBlocks(textWithoutInlines);
+    let { edits, prose: patchProse } = parsePatchBlocks(textWithoutInlines);
+    let { files, prose: fileProse } = parseFileBlocks(textWithoutInlines);
+
+    // Inline-mode enforcement: when the user is in an inline-scoped turn
+    // (selected one element from the preview), the runtime contract is that
+    // ONLY the scoped element changes. If the model emitted FILE/EDIT/REGION
+    // blocks anyway — usually trying to patch the page stylesheet for things
+    // an inline `style=""` can't express (@media, :root tokens, class rules) —
+    // drop them. The smaller models (Haiku) silently aim EDIT blocks at the
+    // wrong selector and pretend they succeeded; this surfaces those as a
+    // visible "switch to main chat" prompt instead of a silent no-op.
+    const lastUserMsg = [...baseMessages].reverse().find(m => m.role === 'user');
+    const wasInlineTurn = !!lastUserMsg?.inlineScope;
+    let droppedOffScope = false;
+    if (wasInlineTurn) {
+      const offScopeCount = regions.length + Object.keys(edits).length + Object.keys(files).length;
+      if (offScopeCount > 0) {
+        droppedOffScope = true;
+        regions = [];
+        edits = {};
+        files = {};
+      }
+    }
     const editFiles = Object.keys(edits);
-    const { files, prose: fileProse } = parseFileBlocks(textWithoutInlines);
 
     const rejectedFiles = [];
     const safeFiles = {};
@@ -71,6 +92,17 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     let updatedPages = { ...pages, ...safeFiles };
     let appliedSummary = [];
     const failureMessages = [];
+
+    if (droppedOffScope) {
+      const note = inlines.length > 0
+        ? `Some changes were dropped — inline mode only applies edits to the scoped element. Page-wide CSS / stylesheet edits (\`@media\`, \`:root\` tokens, class rules) need the main chat: clear the inline selection (the chip below the chat) and resend.`
+        : `This change needs to touch the page stylesheet (\`@media\`, \`:root\` tokens, or class rules), which inline mode can't apply. Clear the inline selection (the chip below the chat) and resend the same prompt to make the change in main chat.`;
+      failureMessages.push({
+        role: 'system',
+        content: note,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     if (regions.length > 0) {
       const regionResult = applyRegions(updatedPages, regions);
@@ -164,13 +196,21 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       }
     }
 
-    const prose = editFiles.length > 0 ? patchProse : fileProse;
+    // When we dropped off-scope blocks in an inline turn, prefer patchProse
+    // (EDIT markers stripped) so the user sees the model's commentary cleanly
+    // — fileProse still contains raw EDIT markup in this scenario.
+    let prose;
+    if (droppedOffScope) {
+      prose = patchProse || fileProse;
+    } else {
+      prose = editFiles.length > 0 ? patchProse : fileProse;
+    }
     let displayContent = prose;
     if (!displayContent) {
       const didSomething = editFiles.length > 0 || fileNames.length > 0 || regions.length > 0 || inlines.length > 0;
       displayContent = didSomething
         ? (Object.keys(pages).length > 0 ? 'Design updated.' : 'Design generated.')
-        : '(empty response)';
+        : (droppedOffScope ? 'No inline change made — see note below.' : '(empty response)');
     }
 
     const assistantMsg = {
