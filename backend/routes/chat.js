@@ -297,8 +297,15 @@ router.post('/', async (req, res, next) => {
       // Otherwise the line "Used N images. Discarded 0" is just noise on
       // every chat turn (notably misleading for inline edits that don't
       // touch images at all).
+      //
+      // Skip entirely for inline edits: they're scoped to one element and
+      // aren't an image-pool moment. Running cleanup here is both irrelevant
+      // (it sweeps pre-existing orphans unrelated to the user's request, then
+      // reports them as "Discarded N") and risky (an accidental dropped image
+      // ref in a re-emitted element would permanently delete the file).
+      // Orphans get swept on the next full chat turn instead.
       let imageStats = null;
-      if (process.env.PIXABAY_API_KEY && context?.slug) {
+      if (process.env.PIXABAY_API_KEY && context?.slug && !isInlineEdit) {
         try {
           const currentPages = context?.currentPages || {};
           const { files: newFiles } = parseFileBlocks(job.fullText);
