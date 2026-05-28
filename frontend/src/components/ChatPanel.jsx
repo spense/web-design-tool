@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { streamChat, pollJobResult, api } from '../api.js';
 import { parseFileBlocks, detectUrl, isCompleteHtmlDoc } from '../parseFiles.js';
-import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, editStartIndex, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
+import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, editStartIndex, designStartIndex, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
 import Spinner from './Spinner.jsx';
 
 const MODELS = [
@@ -661,8 +661,10 @@ function StreamingMessage({ text, model, isUpdate, startedAt, imagePoolStatus })
 
   const isStreaming = text.length > 0;
   const editIdx = editStartIndex(text);
+  const designIdx = designStartIndex(text);
   let label;
-  if (editIdx !== -1) label = 'Applying edits';
+  if (designIdx === -1) label = 'Thinking';        // no design marker yet → answering or preamble
+  else if (editIdx !== -1) label = 'Applying edits';
   else if (isUpdate) label = 'Updating design';
   else label = 'Generating design';
 

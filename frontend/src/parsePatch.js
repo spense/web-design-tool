@@ -168,6 +168,14 @@ export function editStartIndex(text) {
   return m ? m.index : -1;
 }
 
+// Index of the first design-emitting marker of ANY kind (FILE/EDIT/REGION/INLINE),
+// or -1 if none present. Used to tell a real design response apart from an
+// answer-only reply (a question/explanation that emits no markers).
+export function designStartIndex(text) {
+  const m = text.match(/<!--\s*(?:FILE|EDIT|REGION|INLINE):/i);
+  return m ? m.index : -1;
+}
+
 // Parse `<!-- REGION: <target> in <files> -->\n<content>\n<!-- /REGION -->` blocks.
 // Targets: 'header' | 'footer' | 'nav' | 'root'.
 // Files: comma-separated bare filenames OR '*.html' / '*' wildcard.
