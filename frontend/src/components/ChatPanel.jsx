@@ -454,7 +454,8 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     setStreaming(true);
     setStreamingText('');
     streamStartRef.current = Date.now();
-    abortRef.current = new AbortController();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
 
     const storageKey = `gen:${project.slug}`;
 
@@ -480,10 +481,10 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
             model,
           }));
         },
-        signal: abortRef.current.signal,
+        signal: ctrl.signal,
       });
     } catch (e) {
-      if (e.name === 'AbortError' || abortRef.current?.signal.aborted) {
+      if (e.name === 'AbortError' || ctrl.signal.aborted) {
         localStorage.removeItem(storageKey);
         setImagePoolStatus(null);
         return;
@@ -492,7 +493,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       const jid = e.jobId || jobIdRef.current;
       if (jid) {
         try {
-          result = await pollJobResult(jid, { signal: abortRef.current?.signal });
+          result = await pollJobResult(jid, { signal: ctrl.signal });
         } catch (pollErr) {
           if (pollErr.name === 'AbortError') { localStorage.removeItem(storageKey); return; }
           localStorage.removeItem(storageKey);
@@ -522,6 +523,14 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     localStorage.removeItem(storageKey);
     const elapsedSecs = streamStartRef.current ? Math.floor((Date.now() - streamStartRef.current) / 1000) : null;
     streamStartRef.current = null;
+
+    // If the user hit Stop while the result was already in flight (e.g. the
+    // 'done' event was buffered at the moment they clicked), don't apply it —
+    // stopStream() has already recorded the stop and reset the UI.
+    if (ctrl.signal.aborted) {
+      setImagePoolStatus(null);
+      return;
+    }
 
     applyResultRef.current(result, newMessages, updatedProject, model, elapsedSecs);
   };
@@ -659,7 +668,6 @@ function StreamingMessage({ text, model, isUpdate, startedAt, imagePoolStatus })
     return () => clearInterval(iv);
   }, [startedAt]);
 
-  const isStreaming = text.length > 0;
   const editIdx = editStartIndex(text);
   const designIdx = designStartIndex(text);
   let label;
@@ -679,13 +687,13 @@ function StreamingMessage({ text, model, isUpdate, startedAt, imagePoolStatus })
     <div className="chat-msg assistant">
       <div className="who">assistant · {MODEL_LABELS[model] || model}</div>
       <div className="body">
-        {isStreaming && (
-          <span className="gen-status" style={{ display: 'flex' }}>
-            <Spinner /> {label}… ({formatDuration(elapsed)})
-          </span>
-        )}
+        {/* Show the spinner the moment the request starts, before the first
+            token arrives, so there's no dead empty-bubble phase. */}
+        <span className="gen-status" style={{ display: 'flex' }}>
+          <Spinner /> {label}… ({formatDuration(elapsed)})
+        </span>
         {imagePoolLabel && (
-          <div className="crawl-info" style={{ marginTop: isStreaming ? 4 : 0 }}>{imagePoolLabel}</div>
+          <div className="crawl-info" style={{ marginTop: 4 }}>{imagePoolLabel}</div>
         )}
       </div>
     </div>
