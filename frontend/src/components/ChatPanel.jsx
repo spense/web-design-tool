@@ -27,6 +27,11 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   const [crawling, setCrawling] = useState(false);
   const [imagePoolStatus, setImagePoolStatus] = useState(null); // null | { status: 'searching' } | { status: 'ready', poolSize }
   const [attachments, setAttachments] = useState([]);
+  // Per-prompt opt-in to send more project context than the default. In
+  // inline mode, default = element-scope only; checking this adds the scoped
+  // page. In main chat, default = current page only; checking this adds all
+  // pages. Resets after every send so the cheap default is always re-armed.
+  const [includeExtraContext, setIncludeExtraContext] = useState(false);
   const messagesRef = useRef(null);
   const panelRef = useRef(null);
   const textareaRef = useRef(null);
@@ -459,6 +464,24 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
 
     const storageKey = `gen:${project.slug}`;
 
+    // Design brief: the first user message in the session, regardless of any
+    // Clear-context markers. Sent in context so the backend can cache it and
+    // keep it available across context clears.
+    const firstUserMsg = newMessages.find(m => m.role === 'user' && typeof m.content === 'string');
+    const designBrief = firstUserMsg?.content || '';
+
+    // Page-context tier: cheap by default, opt-in to expand.
+    //   inline + unchecked  → 'none'    (element scope is enough)
+    //   inline + checked    → 'current' (the scoped page)
+    //   main   + unchecked  → 'current' (the active page)
+    //   main   + checked    → 'all'     (every page — cross-page changes)
+    const pageContext = sendScope
+      ? (includeExtraContext ? 'current' : 'none')
+      : (includeExtraContext ? 'all' : 'current');
+
+    // Reset the per-prompt checkbox so the cheap default is re-armed for next turn.
+    if (includeExtraContext) setIncludeExtraContext(false);
+
     let result;
     try {
       result = await streamChat({
@@ -469,6 +492,8 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           crawledData: updatedProject.crawledData,
           activePage,
           currentPages: pages,
+          pageContext,
+          designBrief,
         },
         inlineScope: sendScope,
         onDelta: (_d, full) => setStreamingText(full),
@@ -649,6 +674,22 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
               <SendIcon /> Send
             </button>
           )}
+        </div>
+        <div className="chat-input-options">
+          <label
+            className="chat-context-toggle"
+            title={inlineScope
+              ? "Adds the current page's HTML to this prompt (default: element-scope only). Resets after sending."
+              : "Adds every page's HTML to this prompt (default: only the active page). Resets after sending."}
+          >
+            <input
+              type="checkbox"
+              checked={includeExtraContext}
+              onChange={(e) => setIncludeExtraContext(e.target.checked)}
+              disabled={streaming}
+            />
+            <span>{inlineScope ? 'Include this page context' : 'Include all page contexts'}</span>
+          </label>
         </div>
       </div>
     </div>

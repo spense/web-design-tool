@@ -400,6 +400,27 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   align-items: center;
   gap: 2px;
 }
+.chat-input-options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.chat-context-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--pill);
+  transition: color 0.1s, background-color 0.1s;
+}
+.chat-context-toggle:hover { color: var(--text); background-color: var(--bg-elev-2); }
+.chat-context-toggle input { cursor: pointer; margin: 0; }
+.chat-context-toggle input:disabled { cursor: not-allowed; }
 .chat-input-row button.icon-only {
   padding: 4px;
   display: inline-flex;

@@ -29,11 +29,30 @@ router.post('/', async (req, res, next) => {
 
     const isFirstGeneration = !context?.currentPages || Object.keys(context.currentPages).length === 0;
     const isInlineEdit = !!inlineScope && typeof inlineScope.path === 'string' && typeof inlineScope.page === 'string';
+
+    // Page-context tier — how much of the project's HTML to include in the
+    // system prompt this turn. The frontend picks this based on mode and a
+    // per-prompt "Include … context" checkbox:
+    //   'none'    — no page dump (default for inline edits — element scope is enough)
+    //   'current' — only the active/scoped page (default for main chat)
+    //   'all'     — every page (opt-in; needed for cross-page work)
+    // Falls back to legacy 'all' if an old client doesn't send the field.
+    const pageContext = (context?.pageContext === 'none' || context?.pageContext === 'current' || context?.pageContext === 'all')
+      ? context.pageContext
+      : 'all';
+
     let cachedSystem = SYSTEM_PROMPT;
     if (isFirstGeneration) cachedSystem += MULTI_PAGE_WORKFLOW;
     if (isInlineEdit) cachedSystem += INLINE_MODE;
     if (context?.crawledData) {
       cachedSystem += `\n\n--- INTAKE DATA (crawled from ${context.crawledData.startUrl}) ---\n${JSON.stringify(context.crawledData, null, 2)}`;
+    }
+    // Design brief: the project's original ask. Stays in the cached system
+    // block so it survives Clear context (which only slices the user/assistant
+    // message history) and so subsequent turns hit cache. The frontend derives
+    // this from the first user message in the session, regardless of clear markers.
+    if (context?.designBrief && typeof context.designBrief === 'string' && context.designBrief.trim()) {
+      cachedSystem += `\n\n--- DESIGN BRIEF (original project ask) ---\n${context.designBrief.trim()}`;
     }
 
     let dynamicSystem = '';
@@ -62,17 +81,35 @@ router.post('/', async (req, res, next) => {
     if (context?.activePage) {
       dynamicSystem += `\n\n--- ACTIVE CONTEXT ---\nThe user is currently viewing "${context.activePage}" in the design preview. If they ask for changes without specifying a page, assume they mean this page.`;
     }
-    if (context?.currentPages && Object.keys(context.currentPages).length > 0) {
-      if (isInlineEdit) {
-        // In inline mode the model can only emit an INLINE block for the scoped
-        // element. Label the file dump as read-only reference so the model uses
-        // it to match design tokens / voice rather than trying to PATCH it.
-        dynamicSystem += `\n\n--- DESIGN REFERENCE (read-only) ---\nThe project currently contains these files: ${Object.keys(context.currentPages).join(', ')}. The contents are shown for reference ONLY — to help you match the surrounding design tokens, fonts, and content style. Do NOT emit EDIT/PATCH/REGION/FILE blocks against these files this turn; the runtime will drop them.\n`;
+    if (context?.currentPages && Object.keys(context.currentPages).length > 0 && pageContext !== 'none') {
+      const allPages = context.currentPages;
+      const allFilenames = Object.keys(allPages);
+      let pagesToDump = {};
+      if (pageContext === 'all') {
+        pagesToDump = allPages;
       } else {
-        dynamicSystem += `\n\n--- CURRENT DESIGN ---\nThe project currently contains these files: ${Object.keys(context.currentPages).join(', ')}.\nWhen iterating with PATCH MODE, your SEARCH blocks must be byte-exact matches against the file contents below.\n`;
+        // 'current' — pick the scoped page (inline) or the active page (main).
+        // Fall back to the first file if neither resolves, so the model still
+        // has some grounding rather than nothing.
+        const target = (isInlineEdit && inlineScope?.page) || context?.activePage || allFilenames[0];
+        if (target && allPages[target]) pagesToDump[target] = allPages[target];
       }
-      for (const [name, content] of Object.entries(context.currentPages)) {
-        dynamicSystem += `\n<!-- CURRENT FILE: ${name} -->\n${content}\n`;
+      const dumpedNames = Object.keys(pagesToDump);
+      if (dumpedNames.length > 0) {
+        const otherNames = allFilenames.filter(n => !dumpedNames.includes(n));
+        const trimmedNote = pageContext === 'all'
+          ? ''
+          : (otherNames.length > 0
+              ? ` Only the ${isInlineEdit ? 'scoped' : 'active'} page is shown below to save tokens; other files (${otherNames.join(', ')}) are omitted. If the user references those pages and you don't have what you need, ask them to enable "Include all page contexts" and resend.`
+              : '');
+        if (isInlineEdit) {
+          dynamicSystem += `\n\n--- DESIGN REFERENCE (read-only) ---\nThe project contains these files: ${allFilenames.join(', ')}.${trimmedNote}\nThe content below is shown for reference ONLY — to help you match the surrounding design tokens, fonts, and content style. Do NOT emit EDIT/PATCH/REGION/FILE blocks against these files this turn; the runtime will drop them.\n`;
+        } else {
+          dynamicSystem += `\n\n--- CURRENT DESIGN ---\nThe project contains these files: ${allFilenames.join(', ')}.${trimmedNote}\nWhen iterating with PATCH MODE, your SEARCH blocks must be byte-exact matches against the file contents below.\n`;
+        }
+        for (const [name, content] of Object.entries(pagesToDump)) {
+          dynamicSystem += `\n<!-- CURRENT FILE: ${name} -->\n${content}\n`;
+        }
       }
     }
 
