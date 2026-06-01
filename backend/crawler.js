@@ -31,11 +31,6 @@ function extractPage(html, url) {
     const t = $(el).text().trim();
     if (t) headings.push({ level: el.tagName.toLowerCase(), text: t });
   });
-  const images = [];
-  $('img[src]').each((_, el) => {
-    const src = $(el).attr('src');
-    if (src) images.push(new URL(src, url).href);
-  });
   const navLinks = [];
   $('nav a[href], header a[href]').each((_, el) => {
     const href = $(el).attr('href');
@@ -55,7 +50,6 @@ function extractPage(html, url) {
     description,
     text,
     headings: headings.slice(0, 30),
-    images: images.slice(0, 100),
     navLinks: navLinks.slice(0, 40),
     colorHints: Array.from(colorHints).slice(0, 20),
   };

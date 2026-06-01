@@ -33,6 +33,10 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   // pages. Resets after every send so the cheap default is always re-armed.
   const [includeExtraContext, setIncludeExtraContext] = useState(false);
   const messagesRef = useRef(null);
+  // Whether the message list is pinned to the bottom. Drives auto-scroll during
+  // streaming: true while the user is at/near the bottom, false once they scroll
+  // up to read earlier content.
+  const stickToBottomRef = useRef(true);
   const panelRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -359,9 +363,19 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     onUpdate(undefined, [...messages, marker], project);
   };
 
+  // Auto-scroll to the bottom as content streams in — but only while the user
+  // is already pinned to the bottom. If they scroll up to read earlier output
+  // mid-generation, stop yanking them back down.
   useEffect(() => {
+    if (!stickToBottomRef.current) return;
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight });
   }, [messages, streamingText, crawling]);
+
+  // Focus the chat input when the user starts (or retargets) an inline prompt
+  // via the preview's Select → Prompt action, so they can type immediately.
+  useEffect(() => {
+    if (inlineScope) textareaRef.current?.focus();
+  }, [inlineScope]);
 
   useEffect(() => {
     onStreamingChangeRef.current?.(streaming || crawling || !!imagePoolStatus);
@@ -382,8 +396,18 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
   }, [input]);
 
+  // Re-pin to the bottom when the user sends, so their new message and the
+  // incoming response are visible even if they'd scrolled up earlier.
+  const handleMessagesScroll = () => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distanceFromBottom < 40;
+  };
+
   const send = async () => {
     if (!input.trim() || streaming || !hasApiKey) return;
+    stickToBottomRef.current = true;
     const text = input.trim();
     setInput('');
 
@@ -569,7 +593,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
 
   return (
     <div className="chat-panel" ref={panelRef}>
-      <div className="chat-messages" ref={messagesRef}>
+      <div className="chat-messages" ref={messagesRef} onScroll={handleMessagesScroll}>
         {messages.length === 0 && !streaming && !crawling && !imagePoolStatus && (
           <div className="chat-empty">
             Paste a URL to crawl, or describe the site you want to design.

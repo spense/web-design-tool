@@ -4,6 +4,7 @@ import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, INLINE_
 import { detectMissingPages, extractPlannedPages, parseFileBlocks } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
 import { extractSearchTerms, evaluateImageIntent, buildImagePool, formatPoolForPrompt, cleanupUnusedImages, listExistingPool } from '../pixabay.js';
+import { evaluateSiteImageIntent, resolveTargetUrl, crawlPageImages, buildSiteImagePool } from '../siteImages.js';
 
 const router = Router();
 
@@ -130,11 +131,19 @@ router.post('/', async (req, res, next) => {
       if (!res.writableEnded) { try { res.write(chunk); } catch {} }
     };
 
-    // Pixabay image pool: search and download before generation starts.
-    // `searchedThisTurn` tracks whether this turn actually triggered a new
-    // image search — used below to decide whether to report imageStats.
+    // Image pool: prepare images before generation starts. Two independent
+    // sources, both downloaded into uploads/ so assets stay local (they survive
+    // export and downstream R2 upload — never reference a remote URL):
+    //   1. On-demand SITE-image reuse — pull existing images from a specific
+    //      page of the crawled site when the user explicitly asks (e.g. "use
+    //      the gallery images from /portfolio"). No Pixabay key required.
+    //   2. PIXABAY stock search — first generation always; later turns gated by
+    //      a cheap regex pre-filter + Haiku intent check.
+    // `searchedThisTurn` tracks whether this turn added images — used below to
+    // decide whether to report imageStats. Skipped for inline edits (scoped to
+    // one element — not a pool-populating moment).
     let searchedThisTurn = false;
-    if (process.env.PIXABAY_API_KEY && context?.slug) {
+    if (context?.slug && !isInlineEdit) {
       try {
         const lastUserMsg = [...(messages || [])].reverse().find(m => m.role === 'user');
         let lastUserText = '';
@@ -147,53 +156,75 @@ router.post('/', async (req, res, next) => {
         }
 
         const existing = isFirstGeneration ? [] : await listExistingPool(context.slug);
+        const maybeAboutImages = !hasAttachments && /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|logo|logos|avatar|avatars|unsplash|pixabay)\b/i.test(lastUserText);
+        let poolInjected = false;
 
-        // For first generation, always search. For subsequent prompts, use a
-        // two-stage filter: a cheap regex pre-filter catches image-adjacent
-        // words, then Haiku makes the smart YES/NO call on whether the user
-        // actually wants NEW images (vs layout changes like "move the image").
-        // Skip entirely when user has attachments (their own images), and
-        // skip entirely for inline edits (scoped to one element — not a pool-
-        // populating moment).
-        const maybeAboutImages = !hasAttachments && !isInlineEdit && /\b(image|photo|picture|background|gallery|hero|illustration|video|imagery|photos|images|unsplash|pixabay)\b/i.test(lastUserText);
-        let needsNewImages = false;
-
-        if (isFirstGeneration) {
-          needsNewImages = true;
-          searchedThisTurn = true;
-          safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
-          const searchTerms = await extractSearchTerms(context.crawledData, lastUserText);
-          console.log(`[chat] pixabay search terms: ${searchTerms.join(', ')}`);
-          const pool = await buildImagePool(context.slug, searchTerms);
-          if (pool.length > 0) {
-            dynamicSystem += formatPoolForPrompt(pool);
-            safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'ready', poolSize: pool.length })}\n\n`);
-          }
-        } else if (maybeAboutImages) {
-          // Regex matched — ask Haiku whether this is actually a request for
-          // NEW images or just a layout change involving existing ones.
-          const intent = await evaluateImageIntent(context.crawledData, lastUserText);
-          needsNewImages = intent.needsImages;
-          if (needsNewImages && intent.terms.length > 0) {
-            searchedThisTurn = true;
+        // 1) On-demand site-image reuse. Gate behind the cheap regex, then ask
+        // Haiku whether the user wants EXISTING site images and from which page.
+        if (maybeAboutImages && context?.crawledData?.startUrl) {
+          const siteIntent = await evaluateSiteImageIntent(context.crawledData, lastUserText);
+          if (siteIntent.needsSiteImages) {
+            const targetUrl = resolveTargetUrl(siteIntent.targetUrl, context.crawledData.startUrl);
             safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
-            console.log(`[chat] pixabay search terms (intent): ${intent.terms.join(', ')}`);
-            const pool = await buildImagePool(context.slug, intent.terms);
-            const combined = [...existing, ...pool.filter(p => !existing.some(e => e.path === p.path))];
-            if (combined.length > 0) {
-              dynamicSystem += formatPoolForPrompt(combined);
+            const found = await crawlPageImages(targetUrl);
+            console.log(`[chat] site-image crawl ${targetUrl}: ${found.length} images`);
+            const pool = await buildSiteImagePool(context.slug, found);
+            if (pool.length > 0) {
+              const combined = [...existing, ...pool.filter(p => !existing.some(e => e.path === p.path))];
+              const note = siteIntent.placementHint
+                ? `The user asked to use existing site images ${siteIntent.placementHint}. The "site-" prefixed entries below are those images.`
+                : `The "site-" prefixed entries below are existing images pulled from the user's site at the user's request.`;
+              dynamicSystem += formatPoolForPrompt(combined, note);
+              searchedThisTurn = true;
+              poolInjected = true;
               safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'ready', poolSize: combined.length })}\n\n`);
             }
           }
         }
 
-        // Always inject existing pool so the model knows what images are
-        // available, even when we're not searching for new ones.
-        if (!needsNewImages && existing.length > 0) {
+        // 2) Pixabay stock search (requires API key). Skip if the site-image
+        // path already built and injected a pool this turn.
+        let needsNewImages = false;
+        if (!poolInjected && process.env.PIXABAY_API_KEY) {
+          if (isFirstGeneration) {
+            needsNewImages = true;
+            searchedThisTurn = true;
+            safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
+            const searchTerms = await extractSearchTerms(context.crawledData, lastUserText);
+            console.log(`[chat] pixabay search terms: ${searchTerms.join(', ')}`);
+            const pool = await buildImagePool(context.slug, searchTerms);
+            if (pool.length > 0) {
+              dynamicSystem += formatPoolForPrompt(pool);
+              poolInjected = true;
+              safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'ready', poolSize: pool.length })}\n\n`);
+            }
+          } else if (maybeAboutImages) {
+            // Regex matched — ask Haiku whether this is actually a request for
+            // NEW images or just a layout change involving existing ones.
+            const intent = await evaluateImageIntent(context.crawledData, lastUserText);
+            needsNewImages = intent.needsImages;
+            if (needsNewImages && intent.terms.length > 0) {
+              searchedThisTurn = true;
+              safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'searching' })}\n\n`);
+              console.log(`[chat] pixabay search terms (intent): ${intent.terms.join(', ')}`);
+              const pool = await buildImagePool(context.slug, intent.terms);
+              const combined = [...existing, ...pool.filter(p => !existing.some(e => e.path === p.path))];
+              if (combined.length > 0) {
+                dynamicSystem += formatPoolForPrompt(combined);
+                poolInjected = true;
+                safeWriteEarly(`event: preparingImages\ndata: ${JSON.stringify({ status: 'ready', poolSize: combined.length })}\n\n`);
+              }
+            }
+          }
+        }
+
+        // Always surface the existing pool when we didn't inject a fresh one,
+        // so the model knows which images are already available.
+        if (!poolInjected && existing.length > 0) {
           dynamicSystem += formatPoolForPrompt(existing);
         }
       } catch (err) {
-        console.error('[chat] pixabay image pool failed, continuing without:', err.message);
+        console.error('[chat] image pool prep failed, continuing without:', err.message);
       }
     }
 
@@ -342,7 +373,7 @@ router.post('/', async (req, res, next) => {
       // ref in a re-emitted element would permanently delete the file).
       // Orphans get swept on the next full chat turn instead.
       let imageStats = null;
-      if (process.env.PIXABAY_API_KEY && context?.slug && !isInlineEdit) {
+      if (context?.slug && !isInlineEdit) {
         try {
           const currentPages = context?.currentPages || {};
           const { files: newFiles } = parseFileBlocks(job.fullText);

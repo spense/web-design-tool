@@ -21,7 +21,7 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo, onInlinePrompt }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, activeColor, activeFont, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo, onInlinePrompt }) {
   const [viewport, setViewport] = useState('desktop');
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -77,7 +77,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     setDisplayHtml(html);
   }, [html]);
 
-  const handleApplyTokens = (newPages) => {
+  const handleApplyTokens = (newPages, projectPatch) => {
     // Apply CSS vars + fonts directly to live iframe DOM for instant feedback;
     try {
       const iframe = iframeRef.current;
@@ -103,7 +103,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
         }
       }
     } catch {}
-    onApplyTokens(newPages);
+    onApplyTokens(newPages, projectPatch);
   };
 
   // Close page dropdown on outside click (parent doc).
@@ -318,7 +318,11 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
           hoverEl.style.display = 'none';
           return;
         }
-        const target = e.target;
+        let target = e.target;
+        // Clicking/hovering an icon's internals (path, g, …) should highlight
+        // the whole <svg>, not the inner node.
+        const svgRoot = target.closest && target.closest('svg');
+        if (svgRoot) target = svgRoot;
         if (!isSelectable(target, doc) || target === hoverEl || target === activeEl) {
           hoverEl.style.display = 'none';
           return;
@@ -364,6 +368,10 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
         } else {
           lastAltClick = { x: -1, y: -1, idx: -1 };
         }
+
+        // Selecting any part of an icon resolves to the whole <svg>.
+        const svgRoot = target.closest && target.closest('svg');
+        if (svgRoot) target = svgRoot;
 
         if (!isSelectable(target, doc)) return;
         e.preventDefault();
@@ -579,6 +587,8 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 snapshot={snapshot}
                 onSnapshot={onSnapshot}
                 onApply={handleApplyTokens}
+                activeColor={activeColor}
+                activeFont={activeFont}
                 onClose={() => setToolsOpen(false)}
                 slug={slug}
                 project={project}

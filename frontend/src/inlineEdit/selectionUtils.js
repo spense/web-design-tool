@@ -154,5 +154,8 @@ export function isSelectable(el, doc) {
   if (!el || !el.tagName) return false;
   if (el === doc.body || el === doc.documentElement) return false;
   if (SKIP_TAGS.has(el.tagName)) return false;
+  // Only the outer <svg> is selectable — never its internal nodes (path, g,
+  // circle, etc.). An icon should be selected as a single whole.
+  if (el.tagName.toLowerCase() !== 'svg' && el.closest && el.closest('svg')) return false;
   return true;
 }

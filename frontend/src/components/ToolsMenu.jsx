@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   colorThemes, fontPairings, sizingScales, spacingScales, radiusScales,
   buildSizingTokens, buildSpacingTokens, pickCategory,
@@ -11,7 +11,7 @@ const ANIMATION_OPTIONS = [
   { id: 'off', label: 'Off' },
 ];
 
-export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onApply, onClose, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange }) {
+export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onApply, activeColor = 'default', activeFont = 'original', onClose, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange }) {
   const ref = useRef(null);
   const html = pages?.[activePage] || (pages ? Object.values(pages)[0] : '');
   const tokens = extractTokens(html) || {};
@@ -35,14 +35,12 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
     return () => document.removeEventListener('mousedown', onDoc);
   }, [onClose]);
 
-  // Track active selections per category. Color & font we just remember the
-  // last click; size/spacing/radius we infer from the actual token values.
+  // Active color & font come from persisted project state (activeColor/
+  // activeFont props) so the menu reflects the current selection across reopens
+  // and reloads. Size/spacing/radius we infer from the actual token values.
   const inferredSizing = useMemo(() => inferSizing(tokens, snapshot), [tokens, snapshot]);
   const inferredRadius = useMemo(() => inferRadius(tokens), [tokens]);
   const inferredSpacing = useMemo(() => inferSpacing(tokens, snapshot), [tokens, snapshot]);
-
-  const [activeColor, setActiveColor] = useState('default');
-  const [activeFont, setActiveFont] = useState('original');
 
   const hasPages = pages && Object.keys(pages).length > 0;
 
@@ -67,11 +65,9 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
 
   const applyColor = (theme) => {
     const next = theme.build(tokens, snapshot);
-    setActiveColor(theme.id);
-    onApply(applyToAllPages(pages, { tokens: next }));
+    onApply(applyToAllPages(pages, { tokens: next }), { toolsColor: theme.id });
   };
   const applyFont = (pairing) => {
-    setActiveFont(pairing.id);
     if (pairing.id === 'original') {
       const restore = pickCategory(snapshot || tokens, 'font');
       let originalFonts = snapshot?.__googleFonts || null;
@@ -85,14 +81,14 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
           originalFonts = unique.map(n => n.replace(/ /g, '+') + ':wght@400;500;600;700').join('&family=');
         }
       }
-      onApply(applyToAllPages(pages, { tokens: restore, googleFonts: originalFonts }));
+      onApply(applyToAllPages(pages, { tokens: restore, googleFonts: originalFonts }), { toolsFont: 'original' });
       return;
     }
     const tokensPatch = {
       '--font-heading': pairing.heading,
       '--font-body': pairing.body,
     };
-    onApply(applyToAllPages(pages, { tokens: tokensPatch, googleFonts: pairing.googleFonts }));
+    onApply(applyToAllPages(pages, { tokens: tokensPatch, googleFonts: pairing.googleFonts }), { toolsFont: pairing.id });
   };
   const applySizing = (scale) => {
     if (scale.id === 'default') {

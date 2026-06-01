@@ -70,8 +70,16 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
 
   const updatePages = useCallback((newPages, newMessages, newProject) => {
     if (!data) return;
+    let project = newProject || data.project;
+    // A design change from chat/generation re-baselines the Tools menu: the new
+    // design becomes the "default", so drop the token snapshot (re-captured on
+    // next Tools open, which also refreshes the default swatch to the new
+    // colors) and reset the color/font selection to their defaults.
+    if (newPages) {
+      project = { ...project, tokenSnapshot: null, toolsColor: 'default', toolsFont: 'original' };
+    }
     const next = {
-      project: newProject || data.project,
+      project,
       pages: newPages || data.pages,
       session: newMessages ? { messages: newMessages } : data.session,
     };
@@ -87,9 +95,13 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     persist({ ...data, project: nextProject });
   }, [data, persist]);
 
-  const handleApplyTokens = useCallback((newPages) => {
+  const handleApplyTokens = useCallback((newPages, projectPatch) => {
     if (!data) return;
-    persist({ ...data, pages: newPages });
+    // projectPatch carries the Tools-menu selection (toolsColor/toolsFont) so
+    // it persists alongside the token edit. Unlike updatePages, this path does
+    // NOT touch tokenSnapshot — that's the baseline the menu restores to.
+    const project = projectPatch ? { ...data.project, ...projectPatch } : data.project;
+    persist({ ...data, pages: newPages, project });
   }, [data, persist]);
 
   const handleScrollAnimationsChange = useCallback((on) => {
@@ -277,6 +289,8 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
         snapshot={data.project.tokenSnapshot || null}
         onSnapshot={handleSnapshot}
         onApplyTokens={handleApplyTokens}
+        activeColor={data.project.toolsColor || 'default'}
+        activeFont={data.project.toolsFont || 'original'}
         project={data.project}
         onFaviconChange={handleFaviconChange}
         scrollAnimations={data.project.scrollAnimations !== false}

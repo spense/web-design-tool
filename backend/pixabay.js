@@ -179,12 +179,14 @@ export async function buildImagePool(slug, searchTerms, options = {}) {
   return pool;
 }
 
-export function formatPoolForPrompt(pool) {
+export function formatPoolForPrompt(pool, note = '') {
   if (!pool.length) return '';
-  const lines = pool.map(img =>
-    `- ${img.path} — ${img.description} (${img.width}x${img.height})`
-  );
-  return `\n\n--- IMAGE POOL ---\nThe following images have been downloaded and are available for use in the design.\nReference them by their exact path as <img src="uploads/pb-..."> or background-image: url(uploads/pb-...).\nUse inline <img> for content images (team photos, gallery items, service illustrations) and CSS background-image for atmospheric/decorative use (hero backgrounds, section textures, overlays).\nPick images that best match each section's content and purpose.\nIMPORTANT: When the user asks you to use, add, or change an image, just pick the best-fit option from this pool and apply it immediately in code. Do NOT ask the user to choose between options or confirm your selection — make the call yourself. The user will tell you if they want something different.\n\n${lines.join('\n')}\n`;
+  const lines = pool.map(img => {
+    const dims = img.width && img.height ? ` (${img.width}x${img.height})` : '';
+    return `- ${img.path} — ${img.description}${dims}`;
+  });
+  const extra = note ? `\n${note}` : '';
+  return `\n\n--- IMAGE POOL ---\nThe following images have been downloaded into uploads/ and are available for use in the design.\nReference them by their exact path as <img src="uploads/..."> or background-image: url(uploads/...).\nUse inline <img> for content images (team photos, gallery items, service illustrations) and CSS background-image for atmospheric/decorative use (hero backgrounds, section textures, overlays).\nPick images that best match each section's content and purpose.\nIMPORTANT: When the user asks you to use, add, or change an image, just pick the best-fit option from this pool and apply it immediately in code. Do NOT ask the user to choose between options or confirm your selection — make the call yourself. The user will tell you if they want something different.${extra}\n\n${lines.join('\n')}\n`;
 }
 
 export async function cleanupUnusedImages(slug, pages) {
@@ -194,7 +196,7 @@ export async function cleanupUnusedImages(slug, pages) {
     entries = await fs.readdir(uploadsDir);
   } catch { return []; }
 
-  const pbFiles = entries.filter(f => f.startsWith('pb-'));
+  const pbFiles = entries.filter(f => f.startsWith('pb-') || f.startsWith('site-'));
   if (!pbFiles.length) return [];
 
   const allHtml = Object.values(pages).join('\n');
@@ -216,12 +218,20 @@ export async function listExistingPool(slug) {
   try {
     const entries = await fs.readdir(uploadsDir);
     return entries
-      .filter(f => f.startsWith('pb-'))
-      .map(f => ({
-        path: `uploads/${f}`,
-        description: f.replace(/^pb-/, '').replace(/-\d+\.\w+$/, '').replace(/-/g, ' '),
-        width: 0,
-        height: 0,
-      }));
+      .filter(f => f.startsWith('pb-') || f.startsWith('site-'))
+      .map(f => {
+        const isSite = f.startsWith('site-');
+        const description = f
+          .replace(/^(pb|site)-/, '')
+          .replace(isSite ? /-[0-9a-f]{8}\.\w+$/ : /-\d+\.\w+$/, '')
+          .replace(/-/g, ' ')
+          .trim();
+        return {
+          path: `uploads/${f}`,
+          description: description || (isSite ? 'site image' : 'image'),
+          width: 0,
+          height: 0,
+        };
+      });
   } catch { return []; }
 }
