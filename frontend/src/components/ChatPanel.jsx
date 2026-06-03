@@ -62,7 +62,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     // Strip INLINE blocks (header + body up to next comment / end) so they
     // don't leak into the prose parsers below.
     const textWithoutInlines = stripInlineBlocks(textWithoutRegions);
-    let { edits, prose: patchProse } = parsePatchBlocks(textWithoutInlines);
+    let { edits } = parsePatchBlocks(textWithoutInlines);
     let { files, prose: fileProse } = parseFileBlocks(textWithoutInlines);
 
     // Inline-mode enforcement: when the user is in an inline-scoped turn
@@ -195,7 +195,7 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       if (inlineResult.failed.length > 0) {
         const lines = inlineResult.failed.map(f => {
           if (f.reason === 'not_found') return `  • ${f.filename}: file not found`;
-          return `  • ${f.filename} @ ${f.path}: element not found or tag mismatch`;
+          return `  • ${f.filename} @ ${f.path}: selector path didn't resolve, or the reply wasn't a single root element`;
         }).join('\n');
         failureMessages.push({
           role: 'system',
@@ -205,15 +205,13 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       }
     }
 
-    // When we dropped off-scope blocks in an inline turn, prefer patchProse
-    // (EDIT markers stripped) so the user sees the model's commentary cleanly
-    // — fileProse still contains raw EDIT markup in this scenario.
-    let prose;
-    if (droppedOffScope) {
-      prose = patchProse || fileProse;
-    } else {
-      prose = editFiles.length > 0 ? patchProse : fileProse;
-    }
+    // Strip BOTH FILE and EDIT markup from the commentary. fileProse already has
+    // FILE blocks removed (including any trailing prose after </html>); running it
+    // back through the patch parser removes EDIT blocks too. This keeps a response
+    // that mixes FULL FILE MODE (e.g. a new page) and PATCH MODE (edits to an
+    // existing page) from leaking raw HTML/SEARCH-REPLACE markup into the chat —
+    // neither single parser's prose is clean when both block types are present.
+    let prose = parsePatchBlocks(fileProse).prose;
     let displayContent = prose;
     if (!displayContent) {
       const didSomething = editFiles.length > 0 || fileNames.length > 0 || regions.length > 0 || inlines.length > 0;

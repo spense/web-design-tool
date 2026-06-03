@@ -319,8 +319,31 @@ export function parseInlineBlocks(text) {
   return blocks;
 }
 
+// Strip code-execution vectors from an inline replacement element while
+// leaving legitimate embeds (iframe maps/video, etc.) intact. Mutates in place.
+// Removes <script>/<foreignObject> descendants, on* event-handler attributes,
+// and javascript: URLs from href/src/xlink:href.
+function sanitizeInlineMarkup(root) {
+  const DROP = new Set(['SCRIPT', 'FOREIGNOBJECT']);
+  const clean = (el) => {
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith('on')) { el.removeAttribute(attr.name); continue; }
+      if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\s*javascript:/i.test(attr.value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+    for (const child of Array.from(el.children)) {
+      if (DROP.has(child.tagName.toUpperCase())) { child.remove(); continue; }
+      clean(child);
+    }
+  };
+  clean(root);
+}
+
 // Apply a single INLINE block to a page's HTML string. Returns null on any
-// of: path doesn't resolve, markup has zero/multiple roots, root tag mismatch.
+// of: path doesn't resolve, markup has zero/multiple roots. The replacement
+// may change the root tag (e.g. an <a> swapped for an <iframe> embed).
 export function applyInlineToPage(pageHtml, path, newMarkup) {
   if (!pageHtml || !path) return null;
   const doc = new DOMParser().parseFromString(pageHtml, 'text/html');
@@ -338,7 +361,13 @@ export function applyInlineToPage(pageHtml, path, newMarkup) {
   const roots = Array.from(tmp.children);
   if (roots.length !== 1) return null;
   const fresh = roots[0];
-  if (fresh.tagName !== node.tagName) return null;
+  // The replacement is usually the same tag as the target, but inline edits may
+  // intentionally swap the element for a different type — e.g. replacing an
+  // <a> "Open in Google Maps" link with an <iframe> map embed. The positional
+  // selector path already pins the exact element to replace, so a tag change is
+  // safe to honor. Strip only genuinely unsafe nodes/attrs (scripts, inline
+  // event handlers, javascript: URLs); iframes/embeds are allowed.
+  sanitizeInlineMarkup(fresh);
 
   node.replaceWith(fresh);
   const m = pageHtml.match(/^\s*(<!doctype[^>]*>)/i);
@@ -354,7 +383,7 @@ export function applyInlineBlocks(currentPages, blocks) {
     const src = updatedPages[b.filename];
     if (!src) { failed.push({ ...b, reason: 'not_found' }); continue; }
     const next = applyInlineToPage(src, b.path, b.markup);
-    if (next == null) { failed.push({ ...b, reason: 'no_match_or_tag' }); continue; }
+    if (next == null) { failed.push({ ...b, reason: 'no_match' }); continue; }
     updatedPages[b.filename] = next;
     applied.push({ filename: b.filename, path: b.path });
   }

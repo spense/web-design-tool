@@ -28,6 +28,10 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   const iframeRef = useRef(null);
   const pageDropdownRef = useRef(null);
   const savedScrollRef = useRef(0);
+  // When a cross-page hash link (e.g. services.html#fabrication) is clicked,
+  // we switch the active page (which reloads the iframe) and stash the target
+  // section id here so the new page can scroll to it once it finishes loading.
+  const pendingHashRef = useRef(null);
   const scrollAnimationsRef = useRef(scrollAnimations);
   scrollAnimationsRef.current = scrollAnimations;
   const [displayHtml, setDisplayHtml] = useState('');
@@ -187,8 +191,19 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
       try {
         const doc = iframe.contentDocument;
         if (!doc) return;
-        // Restore scroll position saved before srcDoc swap
-        if (savedScrollRef.current) {
+        // A cross-page hash link set a pending scroll target before switching
+        // pages — honor it now that the new page has loaded, taking precedence
+        // over restoring the previous scroll position.
+        if (pendingHashRef.current) {
+          const id = pendingHashRef.current;
+          pendingHashRef.current = null;
+          savedScrollRef.current = 0;
+          const el = doc.getElementById(id);
+          if (el) requestAnimationFrame(() => {
+            try { el.scrollIntoView({ behavior: 'instant', block: 'start' }); } catch {}
+          });
+        } else if (savedScrollRef.current) {
+          // Restore scroll position saved before srcDoc swap
           iframe.contentWindow?.scrollTo({ top: savedScrollRef.current, behavior: 'instant' });
           savedScrollRef.current = 0;
         }
@@ -199,7 +214,17 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
             const resolved = resolveLink(href, pages, doc);
             if (resolved.action === 'page') {
               ev.preventDefault();
-              onActivePage(resolved.target);
+              if (resolved.target === activePage) {
+                // Already on this page — no reload will happen, so scroll to the
+                // fragment (if any) directly instead of stashing it for onLoad.
+                if (resolved.fragment) {
+                  const el = doc.getElementById(resolved.fragment);
+                  if (el) el.scrollIntoView({ behavior: scrollAnimationsRef.current ? 'smooth' : 'instant', block: 'start' });
+                }
+              } else {
+                if (resolved.fragment) pendingHashRef.current = resolved.fragment;
+                onActivePage(resolved.target);
+              }
             } else if (resolved.action === 'scroll') {
               ev.preventDefault();
               const el = doc.getElementById(resolved.target);
@@ -838,10 +863,11 @@ function resolveLink(href, pages, doc) {
   path = path.split('#')[0];
   const last = path.split('/').pop();
 
-  // Direct page match.
-  if (pages[last]) return { action: 'page', target: last };
+  // Direct page match. Carry any fragment so the preview can scroll to the
+  // target section after the destination page loads (e.g. services.html#fabrication).
+  if (pages[last]) return { action: 'page', target: last, fragment };
   // Try adding .html if the AI omitted it.
-  if (!last.includes('.') && pages[`${last}.html`]) return { action: 'page', target: `${last}.html` };
+  if (!last.includes('.') && pages[`${last}.html`]) return { action: 'page', target: `${last}.html`, fragment };
   // Maybe it was meant as a section anchor on the same page.
   if (last && doc.getElementById(last)) return { action: 'scroll', target: last };
   if (fragment && doc.getElementById(fragment)) return { action: 'scroll', target: fragment };

@@ -1,12 +1,51 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, INLINE_MODE, pickRandomArchetype, detectArchetypeInPrompt } from '../anthropic.js';
+import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, INLINE_MODE, pickRandomArchetype, detectArchetypeInPrompt, isPromptCachingEnabled } from '../anthropic.js';
 import { detectMissingPages, extractPlannedPages, parseFileBlocks } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
 import { extractSearchTerms, evaluateImageIntent, buildImagePool, formatPoolForPrompt, cleanupUnusedImages, listExistingPool } from '../pixabay.js';
 import { evaluateSiteImageIntent, resolveTargetUrl, crawlPageImages, buildSiteImagePool } from '../siteImages.js';
 
 const router = Router();
+
+// Extract the first balanced <tag>...</tag> from an HTML string, honoring
+// nesting. Returns the element source (including tags) or null. Used to build a
+// compact cross-page structural reference so REGION edits to header/footer can
+// be done without dumping whole pages into context.
+function extractElement(html, tag) {
+  const openRe = new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'gi');
+  const closeRe = new RegExp(`</${tag}\\s*>`, 'gi');
+  const open = openRe.exec(html);
+  if (!open) return null;
+  const start = open.index;
+  let depth = 1;
+  let pos = open.index + open[0].length;
+  while (depth > 0) {
+    openRe.lastIndex = pos;
+    closeRe.lastIndex = pos;
+    const o = openRe.exec(html);
+    const c = closeRe.exec(html);
+    if (!c) return null;
+    if (o && o.index < c.index) { depth++; pos = o.index + o[0].length; }
+    else { depth--; pos = c.index + c[0].length; if (depth === 0) return html.slice(start, pos); }
+  }
+  return null;
+}
+
+// Build a small reference block of a page's themeable/structural elements
+// (header, footer, :root tokens) so the model can REGION-edit them on pages
+// whose full body isn't in context. Returns '' when nothing notable is found.
+function buildStructureReference(name, html) {
+  const parts = [];
+  const header = extractElement(html, 'header');
+  if (header) parts.push(header);
+  const footer = extractElement(html, 'footer');
+  if (footer) parts.push(footer);
+  const rootMatch = html.match(/:root\s*\{[^}]*\}/i);
+  if (rootMatch) parts.push(`<style>\n${rootMatch[0]}\n</style>`);
+  if (parts.length === 0) return '';
+  return `\n<!-- STRUCTURE REFERENCE: ${name} (header / footer / :root only — full body omitted) -->\n${parts.join('\n')}\n`;
+}
 
 // In-memory job store: survives client disconnects and tab switches.
 const jobs = new Map();
@@ -61,7 +100,7 @@ router.post('/', async (req, res, next) => {
     // Inline-edit scope: tell the model exactly which element to modify.
     if (isInlineEdit) {
       const { path, page, outerHTML, tag, breadcrumb } = inlineScope;
-      dynamicSystem += `\n\n--- INLINE EDIT SCOPE ---\nThe user is editing a single <${tag || 'element'}> element.\n  page: ${page}\n  selectorPath: ${path}\n  breadcrumb: ${breadcrumb || '(unknown)'}\n\nCurrent element outerHTML:\n${outerHTML || '(missing)'}\n\nEmit exactly one INLINE block with header \`<!-- INLINE: ${path} in ${page} -->\` and a single replacement element whose root tag is <${tag}>. No FILE/EDIT/REGION/PATCH blocks this turn.`;
+      dynamicSystem += `\n\n--- INLINE EDIT SCOPE ---\nThe user is editing a single <${tag || 'element'}> element.\n  page: ${page}\n  selectorPath: ${path}\n  breadcrumb: ${breadcrumb || '(unknown)'}\n\nCurrent element outerHTML:\n${outerHTML || '(missing)'}\n\nEmit exactly one INLINE block with header \`<!-- INLINE: ${path} in ${page} -->\` and a single replacement element. Keep the same <${tag}> root tag by default, but if the user explicitly asks to swap this element for a different element type (e.g. replace a link with an <iframe> map/video embed), emit that new root tag instead. No FILE/EDIT/REGION/PATCH blocks this turn.`;
     }
 
     // Inject a random layout archetype for first generations when the user
@@ -110,6 +149,22 @@ router.post('/', async (req, res, next) => {
         }
         for (const [name, content] of Object.entries(pagesToDump)) {
           dynamicSystem += `\n<!-- CURRENT FILE: ${name} -->\n${content}\n`;
+        }
+        // Compact cross-page structural reference: for omitted pages (main chat,
+        // pageContext !== 'all'), include just their header/footer/:root. This
+        // is a few hundred tokens per page instead of the full body, and lets
+        // the model do correct REGION edits to shared chrome (e.g. "add this
+        // logo to the header on both pages") without re-emitting whole pages —
+        // the #1 cause of slow, token-heavy turns for tiny header changes.
+        if (!isInlineEdit && pageContext !== 'all' && otherNames.length > 0) {
+          let structureRef = '';
+          for (const name of otherNames) {
+            const html = allPages[name];
+            if (typeof html === 'string') structureRef += buildStructureReference(name, html);
+          }
+          if (structureRef) {
+            dynamicSystem += `\n--- OTHER PAGES: STRUCTURE REFERENCE ---\nThe full body of ${otherNames.join(', ')} is omitted to save tokens, but their shared chrome is below so you can sync it. For a change to the header/footer/:root that spans pages, emit REGION blocks (one per file when the elements differ between pages, copying each page's own element from here) — do NOT rewrite these pages in FULL FILE MODE just to sync a header/footer/logo/token change.\n${structureRef}`;
+          }
         }
       }
     }
@@ -228,8 +283,15 @@ router.post('/', async (req, res, next) => {
       }
     }
 
+    // Prompt caching is opt-out via PROMPT_CACHING=off. When disabled we drop
+    // cache_control so the API neither writes nor reads a cache — the whole
+    // system prompt is billed as normal input each turn, and the response meta
+    // reports zero cache tokens (the frontend then shows no cache write/read).
+    const cachingOn = isPromptCachingEnabled();
     const systemBlocks = [
-      { type: 'text', text: cachedSystem, cache_control: { type: 'ephemeral' } },
+      cachingOn
+        ? { type: 'text', text: cachedSystem, cache_control: { type: 'ephemeral' } }
+        : { type: 'text', text: cachedSystem },
     ];
     if (dynamicSystem) systemBlocks.push({ type: 'text', text: dynamicSystem });
 
@@ -411,7 +473,7 @@ router.post('/', async (req, res, next) => {
         partsCount,
         imageStats,
       };
-      console.log(`[chat] model=${resolvedModel} parts=${partsCount} stop=${stats.stopReason} in=${stats.usage.input_tokens} out=${stats.usage.output_tokens} cache_write=${stats.usage.cache_creation_input_tokens} cache_read=${stats.usage.cache_read_input_tokens}`);
+      console.log(`[chat] model=${resolvedModel} caching=${cachingOn ? 'on' : 'off'} parts=${partsCount} stop=${stats.stopReason} in=${stats.usage.input_tokens} out=${stats.usage.output_tokens} cache_write=${stats.usage.cache_creation_input_tokens} cache_read=${stats.usage.cache_read_input_tokens}`);
       job.status = 'done';
       job.result = stats;
       safeWrite(`event: done\ndata: ${JSON.stringify(stats)}\n\n`);
