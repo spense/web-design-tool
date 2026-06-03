@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, INLINE_MODE, pickRandomArchetype, detectArchetypeInPrompt, isPromptCachingEnabled } from '../anthropic.js';
+import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, INLINE_SYSTEM_PROMPT, pickRandomArchetype, detectArchetypeInPrompt, isPromptCachingEnabled } from '../anthropic.js';
 import { detectMissingPages, extractPlannedPages, parseFileBlocks } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
 import { extractSearchTerms, evaluateImageIntent, buildImagePool, formatPoolForPrompt, cleanupUnusedImages, listExistingPool } from '../pixabay.js';
@@ -81,9 +81,16 @@ router.post('/', async (req, res, next) => {
       ? context.pageContext
       : 'all';
 
-    let cachedSystem = SYSTEM_PROMPT;
-    if (isFirstGeneration) cachedSystem += MULTI_PAGE_WORKFLOW;
-    if (isInlineEdit) cachedSystem += INLINE_MODE;
+    // Inline edits use a compact, standalone prompt (just the inline contract +
+    // the conventions a scoped edit needs) instead of the full generation
+    // SYSTEM_PROMPT — most of which is irrelevant to changing one element.
+    let cachedSystem;
+    if (isInlineEdit) {
+      cachedSystem = INLINE_SYSTEM_PROMPT;
+    } else {
+      cachedSystem = SYSTEM_PROMPT;
+      if (isFirstGeneration) cachedSystem += MULTI_PAGE_WORKFLOW;
+    }
     if (context?.crawledData) {
       cachedSystem += `\n\n--- INTAKE DATA (crawled from ${context.crawledData.startUrl}) ---\n${JSON.stringify(context.crawledData, null, 2)}`;
     }
