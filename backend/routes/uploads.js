@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { projectDir, getProject, saveProject } from '../storage.js';
@@ -18,18 +19,16 @@ router.post('/:slug/uploads', upload.single('file'), async (req, res, next) => {
     const dir = path.join(projectDir(slug), 'uploads');
     await fs.mkdir(dir, { recursive: true });
 
-    // Sanitize filename, avoid collisions with a small suffix.
     const orig = req.file.originalname || 'image';
     const safe = orig.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'image';
-    let filename = safe;
     const ext = path.extname(safe);
     const stem = path.basename(safe, ext);
-    let suffix = 0;
-    while (await exists(path.join(dir, filename))) {
-      suffix++;
-      filename = `${stem}-${suffix}${ext}`;
+    const hash = crypto.createHash('sha256').update(req.file.buffer).digest('hex').slice(0, 8);
+    const filename = `${stem}-${hash}${ext}`;
+    const dest = path.join(dir, filename);
+    if (!(await exists(dest))) {
+      await fs.writeFile(dest, req.file.buffer);
     }
-    await fs.writeFile(path.join(dir, filename), req.file.buffer);
 
     // Track in project.json
     const uploads = Array.isArray(data.project.uploads) ? data.project.uploads : [];
