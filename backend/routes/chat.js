@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, INLINE_SYSTEM_PROMPT, pickRandomArchetype, detectArchetypeInPrompt, isPromptCachingEnabled } from '../anthropic.js';
+import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, INLINE_SYSTEM_PROMPT, pickRandomArchetype, detectArchetypeInPrompt, pickRandomHeroArchetype, detectHeroArchetypeInPrompt, isPromptCachingEnabled } from '../anthropic.js';
 import { detectMissingPages, extractPlannedPages, parseFileBlocks } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
 import { extractSearchTerms, evaluateImageIntent, buildImagePool, formatPoolForPrompt, cleanupUnusedImages, listExistingPool } from '../pixabay.js';
@@ -110,18 +110,25 @@ router.post('/', async (req, res, next) => {
       dynamicSystem += `\n\n--- INLINE EDIT SCOPE ---\nThe user is editing a single <${tag || 'element'}> element.\n  page: ${page}\n  selectorPath: ${path}\n  breadcrumb: ${breadcrumb || '(unknown)'}\n\nCurrent element outerHTML:\n${outerHTML || '(missing)'}\n\nEmit exactly one INLINE block with header \`<!-- INLINE: ${path} in ${page} -->\` and a single replacement element. Keep the same <${tag}> root tag by default, but if the user explicitly asks to swap this element for a different element type (e.g. replace a link with an <iframe> map/video embed), emit that new root tag instead. No FILE/EDIT/REGION/PATCH blocks this turn.`;
     }
 
-    // Inject a random layout archetype for first generations when the user
-    // prompt doesn't already specify one. This gives the model a concrete
-    // structural starting point instead of defaulting to the same pattern.
+    // Inject random layout + hero archetypes for first generations when the
+    // user prompt doesn't already specify them. This gives the model concrete
+    // structural starting points instead of defaulting to the same patterns.
     if (isFirstGeneration && !isInlineEdit) {
       const userText = (messages || [])
         .filter(m => m.role === 'user')
         .map(m => typeof m.content === 'string' ? m.content : '')
         .join(' ');
+      let injectedLayout = null;
       if (!detectArchetypeInPrompt(userText)) {
         const archetype = pickRandomArchetype();
+        injectedLayout = archetype;
         dynamicSystem += `\n\n--- LAYOUT ARCHETYPE ---\nNo archetype was specified in the prompt. If the prompt contains enough design direction for you to choose a better-fit archetype from the catalog, do so and name it in your commentary. Otherwise, use: **${archetype}**. Adapt it to the business — it's a structural starting point, not a rigid spec.\n\nReminder: before generating HTML, state your IA decisions in the commentary — page structure (single/multi), what pages or sections you're building, and any changes from the existing site's structure. Then state which archetype you're using.`;
         console.log(`[chat] injected random archetype: ${archetype}`);
+      }
+      if (!detectHeroArchetypeInPrompt(userText)) {
+        const hero = pickRandomHeroArchetype(injectedLayout);
+        dynamicSystem += `\n\n--- HERO ARCHETYPE ---\nNo hero archetype was specified. Use: **${hero}**. Adapt it to the business and content. Name the hero archetype in your commentary alongside the layout archetype.`;
+        console.log(`[chat] injected random hero archetype: ${hero}`);
       }
     }
 

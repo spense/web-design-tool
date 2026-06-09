@@ -258,7 +258,32 @@ Natural blends (use when a single archetype doesn't fully serve the page):
 
 Choose the archetype based on the business's goals, content strengths, and what the site needs to accomplish — not based on industry or business type. Any archetype can work for any business when adapted thoughtfully.
 
-- Home page hero: Most sites will have a hero at the top of the home page, but it is best for you to determine this based on the archetype and improvements you suggest from the home page. When you create a hero, it must be engaging and creative. It can include things like heading text, sub heading text, background (image, pattern, or texture), inline image(s), CTA blocks, contact info, etc. Not all these are required. Use your judgement on how best to build out the hero content. Note: not all archetypes call for a traditional hero — some may skip or minimize it in favor of their primary structural pattern.
+Hero archetypes — REQUIRED:
+
+Every home page must use a named hero archetype. Like layout archetypes, the hero archetype will be specified explicitly in the prompt, or injected randomly. The hero archetype is independent of the layout archetype but some pairings are natural — follow the affinity list. Name the hero archetype in your prose commentary.
+
+Available hero archetypes:
+
+\`centered-spotlight\` — Centered column: headline + subtext + CTA(s). Content and alignment are variable — may include an eyebrow or not, a trust bar or not, one CTA or two, background image or solid color, and an inline image beside the text or not. Can be left/center/right aligned and top/middle/bottom positioned. What goes into the hero and how it's arranged depends on the business, the content, and the layout archetype. Do NOT default to the same eyebrow → headline → subtext → 2 CTAs → trust-bar stack every time.
+Affinity: classic-stack, editorial.
+
+\`split-anchor\` — Hard 50/50 or 60/40 vertical split. One half holds headline + CTA; the other holds ONE dominant asset (photo, form, headshot, product shot) filling the viewport height. Hard edge between halves.
+Affinity: split-screen-dual, classic-stack, asymmetric-overlap. Pick when the business has one strong visual asset to lead with.
+
+\`cinematic-frame\` — Full-bleed photo or video fills the entire viewport. Text is caption-style — bottom-left or bottom-center, minimal, often a single line. The image is the subject; words are subtitle. Overlay must stay ≤40% opacity so the photo reads as content, not texture.
+Affinity: fullwidth-media-bands, classic-stack. Pick for visual industries or businesses with strong photography.
+
+\`type-statement\` — Oversized typographic statement fills the viewport. No image, minimal decoration. A single dominant phrase (4–10 words) set large. Sometimes a small mark or pull quote beneath.
+Affinity: editorial, classic-stack, modular-blocks. Pick for brands with a strong POV, opinionated copy, or no photography.
+
+\`stat-headline\` — A headline introduces the business, paired with one massive stat (≥10vw type) that anchors the hero — years in business, volume, rating. The headline provides context; the stat provides proof. The stat must be the largest type in the hero after or alongside the headline, not buried in a small trust bar.
+Affinity: data-forward-stats, classic-stack, editorial. Pick when longevity, scale, or a specific metric is the strongest sell.
+
+\`asymmetric-collage\` — Headline and image deliberately overlap. Type breaks across the photo's edge. Z-index layering, negative margins, broken grid. The most dynamic hero option.
+Affinity: asymmetric-overlap, editorial, fullwidth-media-bands. Pick for creative, portfolio-driven, or design-conscious brands.
+
+\`mosaic-wall\` — A grid of 4–8 tiles (work samples, products, services, locations) IS the hero. Headline lives inside one tile or as a strip above. Looks like a portfolio index above the fold.
+Affinity: modular-blocks, classic-stack. Pick for portfolio-driven, multi-service, or catalog businesses with many visual assets.
 - Section–nav linkage — CRITICAL for single-page designs: every \`<section>\` you create must have an \`id\` attribute, and the nav must include an anchor link to each section. If you build a section called "Services", the markup must be \`<section id="services">\` and the nav must contain \`<a href="#services">Services</a>\`. No orphan sections without nav links. No nav links without matching section IDs. Verify this before finalizing.
 - Contact form: Most sites should include a contact form (in a "contact" section or page), but use judgment. If the user's prompt or page list omits a contact page, or if the business's primary contact method is booking/scheduling (salons, spas, medical offices, etc.), a contact form may not be needed — a CTA linking to an external booking system or a simple phone/email block may be more appropriate. When you do include a contact form, include at least the basics: name, phone, email, message, submit. More fields may be appropriate depending on the business type (services dropdown, location dropdown, address fields, etc.).
 - Do NOT include any JavaScript form submission logic — no addEventListener('submit', ...), no fetch calls to form endpoints, no Web3Forms integration code (access keys, redirect inputs, success/error handling). Just build the HTML form with its fields, labels, and a submit button. The form action, hidden inputs, and submission behavior are wired up by a separate build pipeline after export.
@@ -516,6 +541,57 @@ export function pickRandomArchetype() {
 export function detectArchetypeInPrompt(text) {
   const lower = text.toLowerCase();
   return LAYOUT_ARCHETYPES.some(a => lower.includes(a));
+}
+
+// Hero archetypes for random injection when the prompt doesn't specify one.
+export const HERO_ARCHETYPES = [
+  'centered-spotlight',
+  'split-anchor',
+  'cinematic-frame',
+  'type-statement',
+  'stat-headline',
+  'asymmetric-collage',
+  'mosaic-wall',
+];
+
+// Affinity map: layout archetype → hero archetypes that pair well.
+// When a layout archetype is known, prefer heroes from its affinity list.
+const HERO_AFFINITY = {
+  'classic-stack':          ['centered-spotlight', 'split-anchor', 'cinematic-frame', 'type-statement', 'stat-headline', 'mosaic-wall'],
+  'editorial':              ['centered-spotlight', 'type-statement', 'stat-headline', 'asymmetric-collage'],
+  'split-screen-dual':      ['split-anchor'],
+  'fullwidth-media-bands':  ['cinematic-frame', 'asymmetric-collage'],
+  'modular-blocks':         ['mosaic-wall', 'type-statement'],
+  'data-forward-stats':     ['stat-headline'],
+  'asymmetric-overlap':     ['asymmetric-collage', 'split-anchor'],
+};
+
+/**
+ * Pick a random hero archetype. If a layout archetype is known, pick from
+ * its affinity list; otherwise pick from the full set.
+ */
+export function pickRandomHeroArchetype(layoutArchetype) {
+  let pool = HERO_ARCHETYPES;
+  if (layoutArchetype) {
+    // layoutArchetype may be a blend like "fullwidth-media-bands + data-forward-stats".
+    // Merge affinity lists from both halves, deduplicate.
+    const parts = layoutArchetype.split('+').map(s => s.trim());
+    const merged = new Set();
+    for (const part of parts) {
+      const affinities = HERO_AFFINITY[part];
+      if (affinities) affinities.forEach(h => merged.add(h));
+    }
+    if (merged.size > 0) pool = [...merged];
+  }
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/**
+ * Check whether the user's message already specifies a hero archetype.
+ */
+export function detectHeroArchetypeInPrompt(text) {
+  const lower = text.toLowerCase();
+  return HERO_ARCHETYPES.some(h => lower.includes(h));
 }
 
 export function getAnthropic() {
