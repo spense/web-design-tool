@@ -29,6 +29,7 @@ export const api = {
   exportProject: (slug) => jsonReq('POST', `/export/${slug}`),
   getExportStatus: (slug) => jsonReq('GET', `/export/${slug}/status`),
   clearExportStatus: (slug) => jsonReq('DELETE', `/export/${slug}/status`),
+  openExportFolder: (dir) => jsonReq('POST', '/export/open-folder', { dir }),
   importProject: async (file) => {
     const fd = new FormData();
     fd.append('zip', file);

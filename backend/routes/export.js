@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs/promises';
+import { exec, execFile } from 'child_process';
 import { getProject, projectDir } from '../storage.js';
 import { extractAndDedupCss } from '../cssExtractor.js';
 import { buildMonogramSvg, isImportedPlaceholder } from '../faviconSvg.js';
@@ -20,6 +21,32 @@ function scheduleCleanup(slug) {
     if (j && j.status !== 'running') jobs.delete(slug);
   }, CLEANUP_MS);
 }
+
+router.post('/open-folder', async (req, res) => {
+  const { dir } = req.body;
+  if (!dir || typeof dir !== 'string') {
+    return res.status(400).json({ error: 'Missing dir' });
+  }
+  try {
+    await fs.access(dir);
+  } catch {
+    return res.status(404).json({ error: 'Directory not found' });
+  }
+  const platform = process.platform;
+  if (platform === 'darwin') {
+    const script = `tell application "Finder"\nset f to POSIX file "${dir}" as alias\nmake new Finder window to f\nactivate\nselect every item of f\nend tell`;
+    execFile('osascript', ['-e', script], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true });
+    });
+  } else {
+    const cmd = platform === 'win32' ? 'explorer' : 'xdg-open';
+    exec(`${cmd} ${JSON.stringify(dir)}`, (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true });
+    });
+  }
+});
 
 router.get('/:slug/status', (req, res) => {
   const job = jobs.get(req.params.slug);
