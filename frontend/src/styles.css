@@ -407,6 +407,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   margin-top: 6px;
   font-size: 12px;
 }
+.chat-input-options .spacer { flex: 1; }
+.chat-session-cost {
+  color: var(--text-dim);
+  padding: 4px 8px;
+  font-variant-numeric: tabular-nums;
+}
 .chat-context-toggle {
   display: inline-flex;
   align-items: center;

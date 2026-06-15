@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { streamChat, pollJobResult, api } from '../api.js';
 import { parseFileBlocks, detectUrl, isCompleteHtmlDoc } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, editStartIndex, designStartIndex, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
+import { calculateCost, totalCost, formatCost } from '../pricing.js';
 import Spinner from './Spinner.jsx';
 
 const MODELS = [
@@ -712,6 +713,13 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
             />
             <span>{inlineScope ? 'Include this page context' : 'Include all page contexts'}</span>
           </label>
+          <span className="spacer" />
+          <span
+            className="chat-session-cost"
+            title="Session total — sum of every assistant response's cost in this project"
+          >
+            Session: {formatCost(totalCost(messages))}
+          </span>
         </div>
       </div>
     </div>
@@ -775,6 +783,7 @@ function Message({ msg }) {
   }
   const cacheRead = msg.usage?.cache_read_input_tokens || 0;
   const cacheWrite = msg.usage?.cache_creation_input_tokens || 0;
+  const cost = msg.usage ? calculateCost(msg.model, msg.usage) : 0;
   return (
     <div className={`chat-msg ${msg.role}`}>
       <div className="who">
@@ -798,6 +807,7 @@ function Message({ msg }) {
           {msg.usage.input_tokens} in · {msg.usage.output_tokens} out
           {cacheRead > 0 && ` · ${cacheRead} cached ✓`}
           {cacheWrite > 0 && ` · ${cacheWrite} cache write`}
+          {` · ${formatCost(cost)}`}
         </div>
       )}
     </div>
