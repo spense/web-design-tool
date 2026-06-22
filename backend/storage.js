@@ -89,13 +89,16 @@ export async function saveProject(slug, { project, pages, session, skipHistory }
   const now = new Date().toISOString();
   if (project) {
     project.modified = now;
-    // The favicon is owned by the favicon endpoints — never let a client PUT
-    // clobber it. Only the favicon route writes (or unsets) this field.
+    // The favicon and ogImage are owned by their own endpoints — never let a
+    // client PUT clobber them.
     const existing = await readJson(path.join(dir, 'project.json'), null);
     if (existing && Object.prototype.hasOwnProperty.call(existing, 'favicon')) {
       project.favicon = existing.favicon;
     } else if (!Object.prototype.hasOwnProperty.call(project, 'favicon')) {
       // Leave undefined; readers tolerate either form.
+    }
+    if (existing && Object.prototype.hasOwnProperty.call(existing, 'ogImage')) {
+      project.ogImage = existing.ogImage;
     }
     await writeJson(path.join(dir, 'project.json'), project);
   }
@@ -174,6 +177,17 @@ export async function saveProjectFavicon(slug, favicon) {
   if (!existing) return null;
   if (favicon == null) delete existing.favicon;
   else existing.favicon = favicon;
+  existing.modified = new Date().toISOString();
+  await writeJson(p, existing);
+  return existing;
+}
+
+export async function saveProjectOgImage(slug, ogImage) {
+  const p = path.join(projectDir(slug), 'project.json');
+  const existing = await readJson(p, null);
+  if (!existing) return null;
+  if (ogImage == null) delete existing.ogImage;
+  else existing.ogImage = ogImage;
   existing.modified = new Date().toISOString();
   await writeJson(p, existing);
   return existing;

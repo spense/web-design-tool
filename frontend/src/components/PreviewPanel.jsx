@@ -21,7 +21,7 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, activeColor, activeFont, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo, onInlinePrompt }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, activeColor, activeFont, slug, project, onFaviconChange, onOgImageChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo, onInlinePrompt }) {
   const [viewport, setViewport] = useState('desktop');
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -618,6 +618,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 slug={slug}
                 project={project}
                 onFaviconChange={onFaviconChange}
+                onOgImageChange={onOgImageChange}
                 scrollAnimations={scrollAnimations}
                 onScrollAnimationsChange={onScrollAnimationsChange}
               />

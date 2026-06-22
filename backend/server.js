@@ -16,6 +16,7 @@ import importRouter from './routes/import.js';
 import appStateRouter from './routes/appState.js';
 import uploadsRouter from './routes/uploads.js';
 import faviconRouter from './routes/favicon.js';
+import ogImageRouter from './routes/ogImage.js';
 import pixabayRouter from './routes/pixabay.js';
 import inlineRouter from './routes/inline.js';
 import { ensureProjectsDir } from './storage.js';
@@ -35,6 +36,7 @@ app.get('/api/config', (req, res) => {
 // /:slug/uploads and /:slug/uploads/:filename) take precedence.
 app.use('/api/projects', uploadsRouter);
 app.use('/api/projects', faviconRouter);
+app.use('/api/projects', ogImageRouter);
 app.use('/api/projects', projectsRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/crawl', crawlRouter);

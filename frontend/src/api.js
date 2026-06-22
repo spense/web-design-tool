@@ -99,6 +99,22 @@ export const api = {
   },
   selectFavicon: (slug, selected) => jsonReq('PATCH', `/projects/${slug}/favicon/select`, { selected }),
   deleteUploadedFavicon: (slug) => jsonReq('DELETE', `/projects/${slug}/favicon/uploaded`),
+
+  ogImageFileUrl: (slug, version) => {
+    const v = version != null ? `?v=${version}` : '';
+    return `${API}/projects/${slug}/og-image/file${v}`;
+  },
+  saveOgImage: async (slug, file) => {
+    const fd = new FormData();
+    fd.append('image', file);
+    const res = await fetch(`${API}/projects/${slug}/og-image`, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    return res.json();
+  },
+  deleteOgImage: (slug) => jsonReq('DELETE', `/projects/${slug}/og-image`),
   inlineRewriteText: (text, prompt) => jsonReq('POST', '/inline/rewrite-text', { text, prompt }),
   inlineGenerateSvg: (prompt, currentSvg) => jsonReq('POST', '/inline/generate-svg', { prompt, currentSvg }),
   inlinePromptChange: (outerHTML, prompt) => jsonReq('POST', '/inline/prompt-change', { outerHTML, prompt }),

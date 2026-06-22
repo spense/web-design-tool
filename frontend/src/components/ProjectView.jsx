@@ -117,6 +117,11 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     onUpdateTab?.({ favicon });
   }, [data, onUpdateTab]);
 
+  const handleOgImageChange = useCallback((ogImage) => {
+    if (!data) return;
+    setData(d => d ? { ...d, project: { ...d.project, ogImage } } : d);
+  }, [data]);
+
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
 
@@ -293,6 +298,7 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
         activeFont={data.project.toolsFont || 'original'}
         project={data.project}
         onFaviconChange={handleFaviconChange}
+        onOgImageChange={handleOgImageChange}
         scrollAnimations={data.project.scrollAnimations !== false}
         onScrollAnimationsChange={handleScrollAnimationsChange}
         chatCollapsed={chatCollapsed}

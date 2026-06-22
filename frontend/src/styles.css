@@ -1411,6 +1411,51 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   animation: spin 0.7s linear infinite;
 }
 
+/* OG image section */
+.og-image-preview {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.og-image-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1200 / 630;
+  object-fit: cover;
+}
+.og-image-actions {
+  display: flex;
+  gap: 6px;
+}
+.og-image-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.og-image-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.og-image-btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+.og-image-upload {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.og-image-upload:hover { background: var(--bg-elev-2); }
+
 /* Tab + project list favicons */
 .tab-favicon {
   width: 14px;

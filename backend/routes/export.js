@@ -156,6 +156,14 @@ async function runExport(slug, project, pages, session) {
       }
     }
 
+    const ogImageFile = await collectOgImageExportFile(slug, project.ogImage);
+    if (ogImageFile) {
+      const ogTag = `  <meta property="og:image" content="assets/${ogImageFile.exportName}">\n`;
+      for (const [name, html] of Object.entries(htmlFiles)) {
+        htmlFiles[name] = injectOgImageTag(html, ogTag);
+      }
+    }
+
     const allFiles = { ...htmlFiles, ...cssFiles };
 
     for (const [name, content] of Object.entries(allFiles)) {
@@ -193,6 +201,11 @@ async function runExport(slug, project, pages, session) {
           await fs.copyFile(f.src, dst);
         }
       }
+    }
+
+    if (ogImageFile) {
+      await fs.mkdir(exportAssetsDir, { recursive: true });
+      await fs.copyFile(ogImageFile.src, path.join(exportAssetsDir, ogImageFile.exportName));
     }
 
     return {
@@ -285,6 +298,27 @@ function injectFaviconLinks(html, linkBlock) {
     return stripped.replace(/<\/head>/i, `${linkBlock}</head>`);
   }
   // No <head> tag — nothing useful we can do. Return as-is.
+  return stripped;
+}
+
+async function collectOgImageExportFile(slug, ogImage) {
+  if (!ogImage?.filename) return null;
+  const src = path.join(projectDir(slug), 'og-image', ogImage.filename);
+  try {
+    await fs.access(src);
+    const ext = path.extname(ogImage.filename) || '.png';
+    return { src, exportName: `og-image${ext}` };
+  } catch { return null; }
+}
+
+function injectOgImageTag(html, ogTag) {
+  const stripped = html.replace(
+    /[ \t]*<meta\b[^>]*property=["']og:image["'][^>]*>\s*/gi,
+    ''
+  );
+  if (/<\/head>/i.test(stripped)) {
+    return stripped.replace(/<\/head>/i, `${ogTag}</head>`);
+  }
   return stripped;
 }
 

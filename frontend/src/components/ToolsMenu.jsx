@@ -5,13 +5,14 @@ import {
 } from '../themePresets.js';
 import { extractTokens, extractGoogleFontsQuery, applyToAllPages } from '../tokenRewriter.js';
 import FaviconSection from './FaviconSection.jsx';
+import OgImageSection from './OgImageSection.jsx';
 
 const ANIMATION_OPTIONS = [
   { id: 'on', label: 'On' },
   { id: 'off', label: 'Off' },
 ];
 
-export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onApply, activeColor = 'default', activeFont = 'original', onClose, slug, project, onFaviconChange, scrollAnimations, onScrollAnimationsChange }) {
+export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onApply, activeColor = 'default', activeFont = 'original', onClose, slug, project, onFaviconChange, onOgImageChange, scrollAnimations, onScrollAnimationsChange }) {
   const ref = useRef(null);
   const html = pages?.[activePage] || (pages ? Object.values(pages)[0] : '');
   const tokens = extractTokens(html) || {};
@@ -51,13 +52,20 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
           This design wasn't built with theme tokens. Generate a fresh design or ask the AI to refactor it to use CSS variables.
         </div>
         {hasPages && slug && project && (
-          <FaviconSection
-            slug={slug}
-            project={project}
-            pages={pages}
-            activePage={activePage}
-            onFaviconChange={onFaviconChange}
-          />
+          <>
+            <FaviconSection
+              slug={slug}
+              project={project}
+              pages={pages}
+              activePage={activePage}
+              onFaviconChange={onFaviconChange}
+            />
+            <OgImageSection
+              slug={slug}
+              project={project}
+              onOgImageChange={onOgImageChange}
+            />
+          </>
         )}
       </div>
     );
@@ -175,13 +183,20 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
       </div>
 
       {slug && project && (
-        <FaviconSection
-          slug={slug}
-          project={project}
-          pages={pages}
-          activePage={activePage}
-          onFaviconChange={onFaviconChange}
-        />
+        <>
+          <FaviconSection
+            slug={slug}
+            project={project}
+            pages={pages}
+            activePage={activePage}
+            onFaviconChange={onFaviconChange}
+          />
+          <OgImageSection
+            slug={slug}
+            project={project}
+            onOgImageChange={onOgImageChange}
+          />
+        </>
       )}
     </div>
   );
