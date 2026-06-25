@@ -4,6 +4,7 @@ import { parseFileBlocks, detectUrl, isCompleteHtmlDoc } from '../parseFiles.js'
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, editStartIndex, designStartIndex, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
 import { calculateCost, totalCost, formatCost } from '../pricing.js';
 import Spinner from './Spinner.jsx';
+import AddPageDialog from './AddPageDialog.jsx';
 
 const MODELS = [
   { value: 'sonnet', label: 'Sonnet 4.6' },
@@ -20,7 +21,10 @@ function formatDuration(secs) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-export default function ChatPanel({ project, pages, messages, activePage, onUpdate, hasApiKey, onStreamingChange, inlineScope, onClearInlineScope }) {
+// Mirror of backend SITE_THREAD constant.
+const SITE_THREAD = '__site';
+
+export default function ChatPanel({ project, pages, messages, sessionTotal, activePage, activeScope, onScopeChange, onPagesAction, onUpdate, hasApiKey, onStreamingChange, inlineScope, onClearInlineScope }) {
   const [input, setInput] = useState('');
   const [model, setModel] = useState(project.lastModel || 'sonnet');
   const [streaming, setStreaming] = useState(false);
@@ -33,6 +37,12 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
   // page. In main chat, default = current page only; checking this adds all
   // pages. Resets after every send so the cheap default is always re-armed.
   const [includeExtraContext, setIncludeExtraContext] = useState(false);
+  // Per-prompt opt-in to inject the original crawled site data into the
+  // system prompt. Big (often ~50k tokens) so it's OFF by default for
+  // iteration turns and only auto-armed for first generation and freshly-
+  // added page threads — see the useEffect below. The crawl is preserved
+  // on disk regardless; this only controls whether THIS turn sees it.
+  const [includeCrawlData, setIncludeCrawlData] = useState(false);
   const messagesRef = useRef(null);
   // Whether the message list is pinned to the bottom. Drives auto-scroll during
   // streaming: true while the user is at/near the bottom, false once they scroll
@@ -376,6 +386,45 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     if (inlineScope) textareaRef.current?.focus();
   }, [inlineScope]);
 
+  // Auto-arm the "include extra context" checkbox based on the active scope.
+  // - Inline edit: leave alone (element scope is the cheap default).
+  // - Main Chat with 2+ pages: ON by default — cross-page work needs all
+  //   pages. With only 1 page, OFF (the single page IS the current page —
+  //   checking "all" would just duplicate what 'current' already sends).
+  // - Page thread with zero messages (freshly added page): ON for the first
+  //   turn so the model can see existing pages as templates. Post-send reset
+  //   takes it back to OFF since the thread is now populated.
+  // - Page thread with messages: OFF (cheap iteration on this page only).
+  //
+  // The crawl-data checkbox follows similar logic: ON for first generation
+  // (no pages exist yet) and for freshly-added page threads (likely "build
+  // this page from the crawl"); OFF for iteration turns. The user can tick
+  // it manually per-turn when they need it (e.g. "fill the about page from
+  // the crawl").
+  useEffect(() => {
+    if (inlineScope) return;
+    const pageCount = Object.keys(pages || {}).length;
+    if (activeScope === SITE_THREAD) {
+      setIncludeExtraContext(pageCount > 1);
+      setIncludeCrawlData(pageCount === 0);
+    } else if (messages.length === 0) {
+      // Empty page thread — distinguish a freshly-added STUB page (the user
+      // needs the model to build the whole thing from scratch, so arm both
+      // toggles) from a DUPLICATED / pre-existing page (it already has the
+      // template + content, first turn is likely a small tweak — arm nothing).
+      // HTML size cleanly separates: stubs are ~300 chars, real pages 10k+.
+      const html = pages?.[activeScope] || '';
+      const isStub = html.length < 2000;
+      setIncludeExtraContext(isStub);
+      setIncludeCrawlData(isStub);
+    } else {
+      setIncludeExtraContext(false);
+      setIncludeCrawlData(false);
+    }
+    // Only re-evaluate when scope changes — don't fire on every message.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScope]);
+
   useEffect(() => {
     onStreamingChangeRef.current?.(streaming || crawling || !!imagePoolStatus);
   }, [streaming, crawling, imagePoolStatus]);
@@ -502,8 +551,20 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
       ? (includeExtraContext ? 'current' : 'none')
       : (includeExtraContext ? 'all' : 'current');
 
-    // Reset the per-prompt checkbox so the cheap default is re-armed for next turn.
-    if (includeExtraContext) setIncludeExtraContext(false);
+    // Reset the per-prompt checkbox to the SCOPE default after send. Main Chat
+    // with 2+ pages stays checked (default = include all). Single-page Main
+    // Chat resets to unchecked (current = the only page; "all" would just
+    // duplicate it). Page threads reset to unchecked (default = current page
+    // only) — for a freshly-added page thread, this means the auto-checked
+    // first turn flips off naturally once messages exist. Inline mode default
+    // is unchecked (element scope).
+    const pageCount = Object.keys(pages || {}).length;
+    const scopeDefault = !inlineScope && activeScope === SITE_THREAD && pageCount > 1;
+    if (includeExtraContext !== scopeDefault) setIncludeExtraContext(scopeDefault);
+    // Crawl-data toggle: same reset pattern. Stays off after iteration turns
+    // so the next send doesn't accidentally re-send 50k tokens of crawl —
+    // the user has to consciously re-tick when they need it.
+    if (includeCrawlData) setIncludeCrawlData(false);
 
     let result;
     try {
@@ -513,10 +574,12 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
         context: {
           slug: project.slug,
           crawledData: updatedProject.crawledData,
+          includeCrawlData,
           activePage,
           currentPages: pages,
           pageContext,
           designBrief,
+          scope: activeScope || SITE_THREAD,
         },
         inlineScope: sendScope,
         onDelta: (_d, full) => setStreamingText(full),
@@ -590,12 +653,24 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
     }
   };
 
+  const pageNames = Object.keys(pages || {});
+
   return (
     <div className="chat-panel" ref={panelRef}>
+      <ScopeBar
+        pages={pageNames}
+        activeScope={activeScope || SITE_THREAD}
+        onScopeChange={onScopeChange}
+        disabled={streaming}
+        currentPages={pages}
+        onPagesAction={onPagesAction}
+      />
       <div className="chat-messages" ref={messagesRef} onScroll={handleMessagesScroll}>
         {messages.length === 0 && !streaming && !crawling && !imagePoolStatus && (
           <div className="chat-empty">
-            Paste a URL to crawl, or describe the site you want to design.
+            {activeScope === SITE_THREAD
+              ? 'Main Chat — for project-wide changes (theme, header, footer, nav). Paste a URL to crawl, or describe the site.'
+              : `Chat scoped to ${activeScope}. Describe a change.`}
           </div>
         )}
         {messages.map((m, i) => <Message key={i} msg={m} />)}
@@ -699,30 +774,249 @@ export default function ChatPanel({ project, pages, messages, activePage, onUpda
           )}
         </div>
         <div className="chat-input-options">
-          <label
-            className="chat-context-toggle"
-            title={inlineScope
-              ? "Adds the current page's HTML to this prompt (default: element-scope only). Resets after sending."
-              : "Adds every page's HTML to this prompt (default: only the active page). Resets after sending."}
-          >
-            <input
-              type="checkbox"
-              checked={includeExtraContext}
-              onChange={(e) => setIncludeExtraContext(e.target.checked)}
-              disabled={streaming}
-            />
-            <span>{inlineScope ? 'Include this page context' : 'Include all page contexts'}</span>
-          </label>
+          <div className="chat-context-toggles">
+            <label
+              className="chat-context-toggle"
+              title={inlineScope
+                ? "Adds the current page's HTML to this prompt (default: element-scope only). Resets after sending."
+                : "Adds every page's HTML to this prompt (default: only the active page). Resets after sending."}
+            >
+              <input
+                type="checkbox"
+                checked={includeExtraContext}
+                onChange={(e) => setIncludeExtraContext(e.target.checked)}
+                disabled={streaming}
+              />
+              <span>{inlineScope ? 'Include this page context' : 'Include all page contexts'}</span>
+            </label>
+            {project.crawledData && !inlineScope && (
+              <label
+                className="chat-context-toggle"
+                title="Adds the original crawled site data (titles, descriptions, page text) to this prompt. Big — only check when you actually need source content, e.g. building a new page from the crawl. Resets after sending."
+              >
+                <input
+                  type="checkbox"
+                  checked={includeCrawlData}
+                  onChange={(e) => setIncludeCrawlData(e.target.checked)}
+                  disabled={streaming}
+                />
+                <span>Include crawled site data{formatCrawlSize(project.crawledData)}</span>
+              </label>
+            )}
+          </div>
           <span className="spacer" />
           <span
             className="chat-session-cost"
-            title="Session total — sum of every assistant response's cost in this project"
+            title="Session total — sum of every assistant response's cost across every chat thread in this project"
           >
-            Session: {formatCost(totalCost(messages))}
+            Session: {formatCost(sessionTotal ?? totalCost(messages))}
           </span>
         </div>
       </div>
     </div>
+  );
+}
+
+// Scope selector bar — single "Editing: <name>" dropdown plus page-actions
+// menu. Sits at the top of the chat panel, aligned with the preview toolbar.
+//
+// Dropdown contents are scope-aware:
+//   - 0 pages: no dropdown (label shows "Editing: index.html", disabled).
+//   - 1 page: no dropdown (no other scope to switch to).
+//   - 2+ pages: dropdown lists "All Pages" (SITE_THREAD) + every page file.
+//
+// The page-actions ellipsis (Add / Duplicate / Delete) hides until pages exist.
+function ScopeBar({ pages, activeScope, onScopeChange, disabled, currentPages, onPagesAction }) {
+  const [open, setOpen] = useState(false);
+  // Page dialog: same component handles both Add and Duplicate, differentiated
+  // by `dialogKind`. Duplicate uses the active scope as the source page (or
+  // index.html when in "All Pages" / SITE_THREAD scope).
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogKind, setDialogKind] = useState('add');
+  const [dialogSource, setDialogSource] = useState(null);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const handleAdd = () => {
+    setOpen(false);
+    setDialogKind('add');
+    setDialogSource(null);
+    setDialogOpen(true);
+  };
+
+  const handleDuplicate = () => {
+    setOpen(false);
+    const source = activeScope === SITE_THREAD ? pages[0] : activeScope;
+    if (!source || !currentPages[source]) { alert('Pick a page to duplicate first.'); return; }
+    setDialogKind('duplicate');
+    setDialogSource(source);
+    setDialogOpen(true);
+  };
+
+  // Both kinds funnel through the same action. For 'add' we receive a stub;
+  // for 'duplicate' we receive the source page's HTML — the runtime treats
+  // them identically (it just writes whatever HTML it gets to the new file).
+  const handleDialogCreate = ({ name, html, navLabel }) => {
+    onPagesAction({ action: 'add', name, html, navLabel });
+  };
+
+  const handleDelete = () => {
+    if (!onPagesAction) return;
+    setOpen(false);
+    const target = activeScope === SITE_THREAD ? pages[0] : activeScope;
+    if (!target || !currentPages[target]) { alert('Pick a page to delete first.'); return; }
+    if (target === 'index.html') { alert('Cannot delete index.html.'); return; }
+    if (!window.confirm(`Delete ${target}? Nav links to it will be stripped from other pages.`)) return;
+    onPagesAction({ action: 'remove', name: target });
+  };
+
+  const hasPages = pages.length > 0;
+  const showAllPagesOption = pages.length >= 2;
+  const dropdownOpenable = hasPages && pages.length >= 2; // only worth opening when there's something to switch to
+  const label = activeScope === SITE_THREAD ? 'All Pages' : (activeScope || 'index.html');
+
+  return (
+    <div className="chat-scope-bar">
+      <div className="scope-bar-left">
+        <div className="scope-page-wrap" ref={wrapRef}>
+          <button
+            type="button"
+            className={`scope-btn with-caret${dropdownOpenable ? '' : ' static'}`}
+            onClick={() => dropdownOpenable && setOpen(o => !o)}
+            disabled={disabled || !dropdownOpenable}
+            title={dropdownOpenable ? 'Switch chat scope' : 'Editing this page'}
+          >
+            <span className="scope-prefix">Editing:</span> {label}
+          </button>
+          {open && dropdownOpenable && (
+            <div className="scope-page-list">
+              {showAllPagesOption && (
+                <button
+                  type="button"
+                  className={activeScope === SITE_THREAD ? 'active' : ''}
+                  onClick={() => { onScopeChange(SITE_THREAD); setOpen(false); }}
+                >
+                  All Pages
+                </button>
+              )}
+              {pages.map(name => (
+                <button
+                  key={name}
+                  type="button"
+                  className={name === activeScope ? 'active' : ''}
+                  onClick={() => { onScopeChange(name); setOpen(false); }}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="scope-bar-right">
+        {hasPages && (
+          <ScopeActionsMenu
+            disabled={disabled}
+            onAdd={handleAdd}
+            onDuplicate={handleDuplicate}
+            onDelete={handleDelete}
+          />
+        )}
+      </div>
+      <AddPageDialog
+        open={dialogOpen}
+        kind={dialogKind}
+        sourceName={dialogSource}
+        onClose={() => setDialogOpen(false)}
+        indexHtml={currentPages?.['index.html'] || ''}
+        existingPages={currentPages}
+        onCreate={handleDialogCreate}
+      />
+    </div>
+  );
+}
+
+// Square ellipsis menu on the right of the chat scope bar. Hosts the page
+// management actions (Add / Duplicate / Delete). Visual parity with the
+// preview-toolbar undo/redo buttons.
+function ScopeActionsMenu({ disabled, onAdd, onDuplicate, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div className="scope-actions" ref={wrapRef}>
+      <button
+        type="button"
+        className="scope-actions-btn"
+        onClick={() => setOpen(o => !o)}
+        disabled={disabled}
+        title="Page actions"
+        aria-label="Page actions"
+      >
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="3" cy="7.5" r="1.2" fill="currentColor" />
+          <circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" />
+          <circle cx="12" cy="7.5" r="1.2" fill="currentColor" />
+        </svg>
+      </button>
+      {open && (
+        <div className="scope-actions-list">
+          <button type="button" onClick={() => { setOpen(false); onAdd(); }}>
+            <PlusIcon /> Add Page
+          </button>
+          <button type="button" onClick={() => { setOpen(false); onDuplicate(); }}>
+            <CopyIcon /> Duplicate page
+          </button>
+          <button type="button" onClick={() => { setOpen(false); onDelete(); }}>
+            <TrashIcon /> Delete page
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+function CopyIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+    </svg>
   );
 }
 
@@ -891,6 +1185,17 @@ function readAsText(file) {
 function truncateName(name, max = 40) {
   if (name.length <= max) return name;
   return name.slice(0, max - 3) + '…';
+}
+
+// Rough token estimate for the crawled-data blob, shown in the toggle label
+// so the user can see the cost before ticking the box. ~4 chars per token is
+// a coarse but standard approximation; off by 10-20% is fine for a UI hint.
+function formatCrawlSize(crawledData) {
+  if (!crawledData) return '';
+  const chars = JSON.stringify(crawledData).length;
+  const tokens = Math.round(chars / 4);
+  if (tokens < 1000) return ` (~${tokens} tok)`;
+  return ` (~${Math.round(tokens / 1000)}k tok)`;
 }
 
 // Remove INLINE block headers + their element bodies from `text` so the

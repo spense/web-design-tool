@@ -162,6 +162,160 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   min-width: 0;
 }
 
+/* Chat scope bar — sits at the top of the chat panel, vertically aligned
+   with the preview-toolbar across the gap. Match preview-toolbar's 14px 16px
+   padding + 12px gap so the two top edges land on the same y-axis and the
+   button rows share the same visual weight. */
+.chat-scope-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.chat-scope-bar .scope-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-scope-bar .scope-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Active-thread highlight — uses the same accent treatment as the Export
+   button (.primary) so the selected scope reads as a "live" CTA. Hover keeps
+   the brighter accent-hover for tactile feedback. */
+.chat-scope-bar .scope-btn.active {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+  font-weight: 600;
+}
+.chat-scope-bar .scope-btn.active:hover {
+  background-color: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+/* Re-emit the with-caret SVG with the accent-on stroke (#0b0d12) so the
+   chevron stays legible on the blue active background. */
+.chat-scope-bar .scope-btn.active.with-caret {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%230b0d12' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+.scope-page-wrap {
+  position: relative;
+}
+.scope-page-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 180px;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  overflow: hidden;
+}
+.scope-page-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 12px;
+}
+/* "Editing:" label prefix — muted so the page name reads as the actual value. */
+.scope-prefix {
+  color: var(--text-dim);
+  font-weight: 400;
+  margin-right: 2px;
+}
+/* Static scope button (0 or 1 pages — no dropdown to open). Keep the
+   chevron suppressed and the styling flat so it reads as a label, not a CTA. */
+.chat-scope-bar .scope-btn.static {
+  background-image: none;
+  padding-right: 10px;
+  cursor: default;
+  opacity: 1;
+}
+.chat-scope-bar .scope-btn.static:disabled {
+  opacity: 1;
+  color: var(--text);
+}
+.scope-page-list button:hover { background: var(--border); }
+.scope-page-list button.active { color: var(--accent); }
+.scope-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+/* Square ellipsis-menu trigger on the right of the chat scope bar — Add Page
+   / Duplicate / Remove live in its dropdown. Visual parity with .undo-redo. */
+.scope-actions {
+  position: relative;
+}
+.scope-actions-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+}
+.scope-actions-btn:hover:not(:disabled) {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.scope-actions-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.scope-actions-list {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 160px;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  overflow: hidden;
+}
+.scope-actions-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+}
+.scope-actions-list button svg {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.scope-actions-list button:hover:not(:disabled) { background: var(--border); }
+.scope-actions-list button:hover:not(:disabled) svg { color: var(--text); }
+
 /* Chat */
 .chat-messages {
   flex: 1;
@@ -402,12 +556,18 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 }
 .chat-input-options {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin-top: 6px;
   font-size: 12px;
 }
 .chat-input-options .spacer { flex: 1; }
+.chat-context-toggles {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
 .chat-session-cost {
   color: var(--text-dim);
   padding: 4px 8px;
@@ -1040,6 +1200,13 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   font-family: var(--mono);
 }
 
+.page-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 0 4px;
+  background: transparent;
+}
 .page-dropdown {
   position: relative;
 }
@@ -1486,3 +1653,143 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   vertical-align: -1px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Add Page picker dialog — list of unwired nav items from index.html plus a
+   Custom-filename fallback for off-nav pages. Sits on top of the standard
+   .modal-backdrop overlay. */
+.add-page-dialog {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: min(460px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.add-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.add-page-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.add-page-source {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.add-page-source code {
+  font-family: var(--mono);
+  color: var(--text);
+}
+.add-page-close {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.add-page-close:hover { color: var(--text); background: var(--bg-elev-2); }
+.add-page-body {
+  padding: 8px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.add-page-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.add-page-row:hover { background: var(--bg-elev-2); border-color: var(--border); }
+.add-page-row.custom .row-label { color: var(--accent); }
+.add-page-row.is-current { background: var(--bg-elev-2); }
+.add-page-row.is-current .row-label { color: var(--accent); }
+.add-page-row .row-label { font-weight: 500; }
+.add-page-row .row-slug,
+.add-page-row .row-hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.add-page-row .row-hint { font-family: inherit; }
+.add-page-divider {
+  padding: 12px 12px 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-faint);
+}
+.add-page-empty {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.add-page-empty code { font-size: 11px; color: var(--text); }
+.add-page-error {
+  margin: 8px 12px 4px;
+  padding: 8px 10px;
+  background: rgba(255, 80, 80, 0.1);
+  border: 1px solid rgba(255, 80, 80, 0.3);
+  border-radius: 6px;
+  color: #ff8080;
+  font-size: 12px;
+}
+.add-page-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 4px 4px 0;
+}
+.add-page-input {
+  width: calc(100% - 8px);
+  margin: 4px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+}
+.add-page-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.add-page-hint {
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.add-page-hint code { font-family: var(--mono); color: var(--text-dim); }
+.add-page-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 12px 4px;
+}

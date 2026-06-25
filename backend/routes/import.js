@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 import JSZip from 'jszip';
-import { createProject, saveProject, getProject, projectDir, saveProjectFavicon } from '../storage.js';
+import { createProject, saveProject, getProject, projectDir, saveProjectFavicon, SITE_THREAD } from '../storage.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -114,10 +114,16 @@ router.post('/', upload.single('zip'), async (req, res, next) => {
       }
     }
 
+    // Imported chat history (if any) lands in the index.html thread so it's
+    // visible when the user opens the project. Per-page attribution isn't
+    // recoverable from an export bundle.
+    const threads = { [SITE_THREAD]: [] };
+    for (const name of Object.keys(pages)) threads[name] = [];
+    threads['index.html'] = importMessages;
     await saveProject(project.slug, {
       project,
       pages,
-      session: { messages: importMessages },
+      session: { schemaVersion: 2, threads },
     });
 
     // Reconstruct the favicon if the zip carried one. Generated vs uploaded

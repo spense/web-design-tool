@@ -98,6 +98,10 @@ export function classifyElement(el) {
   const isTextBearing = isTextLeaf(el);
   const isRemovable = !SKIP_TAGS.has(tag) && tag !== 'BODY';
 
+  // Link = the element is an <a> with an href. Used to surface an Edit Link
+  // action that retargets the href without going through chat.
+  const isLink = tag === 'A' && el.hasAttribute && el.hasAttribute('href');
+
   return {
     tag,
     isSvg,
@@ -106,6 +110,7 @@ export function classifyElement(el) {
     hasBgImage,
     isTextBearing,
     isRemovable,
+    isLink,
     canReplaceVisual: isImg || hasBgImage || isSvg,
   };
 }
@@ -158,4 +163,45 @@ export function isSelectable(el, doc) {
   // circle, etc.). An icon should be selected as a single whole.
   if (el.tagName.toLowerCase() !== 'svg' && el.closest && el.closest('svg')) return false;
   return true;
+}
+
+// Heuristic: does this element render anything the user can see right now?
+// Used to skip legitimately-hidden surfaces (closed mobile drawers/overlays,
+// stashed modals) that the Select tool's global `pointer-events: auto`
+// override would otherwise turn into invisible click traps. We deliberately
+// look at the element itself AND its ancestors because hidden parents make
+// children unselectable too.
+export function isVisuallyHidden(el) {
+  if (!el || !el.ownerDocument || !el.ownerDocument.defaultView) return false;
+  const win = el.ownerDocument.defaultView;
+  let node = el;
+  while (node && node.nodeType === 1 && node !== node.ownerDocument.documentElement) {
+    const cs = win.getComputedStyle(node);
+    if (cs.display === 'none') return true;
+    if (cs.visibility === 'hidden' || cs.visibility === 'collapse') return true;
+    // opacity:0 hides the subtree visually — anything inside is also invisible.
+    if (parseFloat(cs.opacity) === 0) return true;
+    node = node.parentElement;
+  }
+  // Off-screen check on the element itself: a closed drawer with
+  // `transform: translateX(100%); position: fixed; right: 0` sits just past
+  // the viewport edge. Bounding rect tells us where it actually paints.
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return true;
+  if (r.bottom <= 0 || r.right <= 0) return true;
+  if (r.top >= win.innerHeight || r.left >= win.innerWidth) return true;
+  return false;
+}
+
+// Walk down through every element at (x, y) and return the first one that's
+// actually visible + selectable. Used by the Select tool to "see past"
+// closed mobile overlays / hidden modals that the global pointer-events
+// override would otherwise make the top hit.
+export function topSelectableAt(doc, x, y) {
+  if (!doc.elementsFromPoint) return null;
+  const candidates = doc.elementsFromPoint(x, y);
+  for (const el of candidates) {
+    if (isSelectable(el, doc) && !isVisuallyHidden(el)) return el;
+  }
+  return null;
 }

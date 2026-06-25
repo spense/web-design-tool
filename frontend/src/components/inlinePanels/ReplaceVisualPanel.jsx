@@ -145,6 +145,27 @@ function ImageFlow({ slug, onApply }) {
 
 /* ─── SVG flow ──────────────────────────────────────────────────────── */
 
+function getIframeCssVars(element) {
+  try {
+    const doc = element?.ownerDocument;
+    const root = doc?.documentElement;
+    if (!root) return {};
+    for (const sheet of doc.styleSheets) {
+      for (const rule of sheet.cssRules) {
+        if (rule.selectorText === ':root') {
+          const vars = {};
+          for (let i = 0; i < rule.style.length; i++) {
+            const prop = rule.style[i];
+            if (prop.startsWith('--')) vars[prop] = rule.style.getPropertyValue(prop);
+          }
+          return vars;
+        }
+      }
+    }
+  } catch {}
+  return {};
+}
+
 function SvgFlow({ element, slug, onApply }) {
   // Prompt-based generation state
   const [prompt, setPrompt] = useState('');
@@ -237,6 +258,7 @@ function SvgFlow({ element, slug, onApply }) {
           <div className="panel-label">Preview</div>
           <div
             className="rv-svg-preview"
+            style={getIframeCssVars(element)}
             dangerouslySetInnerHTML={{ __html: genResult }}
           />
         </>

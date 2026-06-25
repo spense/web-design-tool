@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { getAnthropic, resolveModel, SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, INLINE_SYSTEM_PROMPT, pickRandomArchetype, detectArchetypeInPrompt, pickRandomHeroArchetype, detectHeroArchetypeInPrompt, isPromptCachingEnabled } from '../anthropic.js';
+import { getAnthropic, resolveModel, SYSTEM_PROMPT, ITERATION_SYSTEM_PROMPT, MULTI_PAGE_WORKFLOW, INLINE_SYSTEM_PROMPT, pickRandomArchetype, detectArchetypeInPrompt, pickRandomHeroArchetype, detectHeroArchetypeInPrompt, isPromptCachingEnabled } from '../anthropic.js';
 import { detectMissingPages, extractPlannedPages, parseFileBlocks } from '../parseFiles.js';
 import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, parseInlineBlocks, applyInlineBlocks } from '../parsePatch.js';
 import { extractSearchTerms, evaluateImageIntent, buildImagePool, formatPoolForPrompt, cleanupUnusedImages, listExistingPool } from '../pixabay.js';
@@ -62,13 +62,26 @@ router.post('/', async (req, res, next) => {
   try {
     const { model, messages, context, inlineScope } = req.body || {};
     const currentPageCount = context?.currentPages ? Object.keys(context.currentPages).length : 0;
-    console.log(`[chat] POST received — model=${model} messages=${messages?.length} hasContext=${!!context} hasCrawledData=${!!context?.crawledData} currentPages=${currentPageCount} inlineScope=${!!inlineScope}`);
+    console.log(`[chat] POST received — model=${model} messages=${messages?.length} hasContext=${!!context} hasCrawledData=${!!context?.crawledData} currentPages=${currentPageCount} inlineScope=${!!inlineScope} scope=${context?.scope || 'none'}`);
     const client = getAnthropic();
     const resolvedModel = resolveModel(model);
     const jobId = randomUUID();
 
     const isFirstGeneration = !context?.currentPages || Object.keys(context.currentPages).length === 0;
     const isInlineEdit = !!inlineScope && typeof inlineScope.path === 'string' && typeof inlineScope.page === 'string';
+
+    // Chat scope: which conversation thread this turn belongs to.
+    //   '__site' — project-wide / cross-page conversation (theme, header, footer, :root, nav)
+    //   '<page.html>' — scoped to a specific page
+    // The scope drives a dynamic system-prompt block telling the model the
+    // expected blast radius of this turn. Defaults to '__site' for back-compat
+    // with older clients that don't send a scope.
+    const rawScope = typeof context?.scope === 'string' ? context.scope : null;
+    const chatScope = isInlineEdit
+      ? null
+      : (rawScope === '__site' || (rawScope && context?.currentPages && context.currentPages[rawScope]))
+        ? rawScope
+        : '__site';
 
     // Page-context tier — how much of the project's HTML to include in the
     // system prompt this turn. The frontend picks this based on mode and a
@@ -81,17 +94,32 @@ router.post('/', async (req, res, next) => {
       ? context.pageContext
       : 'all';
 
-    // Inline edits use a compact, standalone prompt (just the inline contract +
-    // the conventions a scoped edit needs) instead of the full generation
-    // SYSTEM_PROMPT — most of which is irrelevant to changing one element.
+    // Three tiers of system prompt to keep iteration turns cheap:
+    //   - INLINE_SYSTEM_PROMPT: inline-edit turns (single scoped element).
+    //   - SYSTEM_PROMPT + MULTI_PAGE_WORKFLOW: first generation only — when
+    //     the model is making the foundational design decisions (archetypes,
+    //     IA, multi-page plan, nav style, contact form scaffolding).
+    //   - ITERATION_SYSTEM_PROMPT: every other turn. Drops the first-gen
+    //     guidance (~2.5-3k tokens saved per turn) since the existing pages
+    //     already encode those decisions and are in context as reference.
     let cachedSystem;
     if (isInlineEdit) {
       cachedSystem = INLINE_SYSTEM_PROMPT;
+    } else if (isFirstGeneration) {
+      cachedSystem = SYSTEM_PROMPT + MULTI_PAGE_WORKFLOW;
     } else {
-      cachedSystem = SYSTEM_PROMPT;
-      if (isFirstGeneration) cachedSystem += MULTI_PAGE_WORKFLOW;
+      cachedSystem = ITERATION_SYSTEM_PROMPT;
     }
-    if (context?.crawledData) {
+    // Crawled intake data is large (often 50k+ tokens). It's the source
+    // material the first generation rewrites copy from — after that, its
+    // content lives in the rendered HTML already in context. Re-sending it
+    // on every iteration was the dominant token cost (87k+ for a "replace
+    // the logo" turn). Include it on first generation (no pages exist yet,
+    // the model needs the source) or when the user explicitly ticks the
+    // "Include crawled site data" checkbox for a turn that genuinely needs
+    // it (e.g. "build an interior About page from the crawl").
+    const includeCrawl = !!context?.crawledData && (isFirstGeneration || context?.includeCrawlData);
+    if (includeCrawl) {
       cachedSystem += `\n\n--- INTAKE DATA (crawled from ${context.crawledData.startUrl}) ---\n${JSON.stringify(context.crawledData, null, 2)}`;
     }
     // Design brief: the project's original ask. Stays in the cached system
@@ -134,6 +162,11 @@ router.post('/', async (req, res, next) => {
 
     if (context?.activePage) {
       dynamicSystem += `\n\n--- ACTIVE CONTEXT ---\nThe user is currently viewing "${context.activePage}" in the design preview. If they ask for changes without specifying a page, assume they mean this page.`;
+    }
+    if (chatScope === '__site') {
+      dynamicSystem += `\n\n--- CHAT SCOPE: PROJECT-WIDE ---\nThis turn is in the project's Main Chat — a dedicated thread for cross-page work. Prefer changes that span pages (theme/\`:root\` token swaps, REGION edits to header / footer / nav, site-wide copy voice). When the user asks for a global change (e.g. "make the header larger", "swap the primary color", "add a logo to every page"), use REGION blocks targeting \`*.html\` or per-file REGION blocks rather than touching one page at a time. Single-page edits ARE still allowed when the user explicitly asks for them ("only on the contact page"), but the default for ambiguous requests in Main Chat is project-wide.`;
+    } else if (chatScope) {
+      dynamicSystem += `\n\n--- CHAT SCOPE: ${chatScope} ---\nThis turn is in the chat thread for **${chatScope}**. Default to changes scoped to this single page. Cross-page changes are allowed when the user explicitly asks for them or when a single-page edit would break shared chrome (e.g. adding a new nav link requires updating every page's header) — in that case, briefly note in your commentary that you're also touching other pages and why.`;
     }
     if (context?.currentPages && Object.keys(context.currentPages).length > 0 && pageContext !== 'none') {
       const allPages = context.currentPages;
@@ -297,11 +330,25 @@ router.post('/', async (req, res, next) => {
       }
     }
 
-    // Prompt caching is opt-out via PROMPT_CACHING=off. When disabled we drop
-    // cache_control so the API neither writes nor reads a cache — the whole
-    // system prompt is billed as normal input each turn, and the response meta
-    // reports zero cache tokens (the frontend then shows no cache write/read).
-    const cachingOn = isPromptCachingEnabled();
+    // Prompt caching is opt-out via PROMPT_CACHING=off (env is the master
+    // kill-switch). When enabled at the env level, we still gate per-request:
+    // caching only earns its keep when the cached prefix gets read multiple
+    // times. Cache writes cost ~1.25x normal input; reads cost ~0.1x —
+    // break-even is 2-3 reads of the same prefix.
+    //
+    // Skip caching for:
+    //   - first generation: one-shot write that's never re-read at this prefix
+    //   - inline edits: different prompt (INLINE_SYSTEM_PROMPT) + short turns
+    //   - the index.html page thread: the "first-page paint + tools" workspace
+    //     where iteration usually happens via direct-edit tools, not chat
+    //
+    // Cache ON for: Main Chat (cross-page work, repeated visits) and non-index
+    // page threads (same cached prefix shared across page generations + edits).
+    const envCachingOn = isPromptCachingEnabled();
+    const cachingOn = envCachingOn
+      && !isFirstGeneration
+      && !isInlineEdit
+      && chatScope !== 'index.html';
     const systemBlocks = [
       cachingOn
         ? { type: 'text', text: cachedSystem, cache_control: { type: 'ephemeral' } }
@@ -410,9 +457,22 @@ router.post('/', async (req, res, next) => {
           r.failed.forEach(f => failedFiles.add(f.filename));
           pagesAfterRegions = r.updatedPages;
         }
+        let pagesAfterPatches = pagesAfterRegions;
         if (Object.keys(edits).length > 0) {
-          const { failed } = applyPatches(pagesAfterRegions, edits);
-          failed.forEach(f => failedFiles.add(f.filename));
+          const r = applyPatches(pagesAfterRegions, edits);
+          r.failed.forEach(f => failedFiles.add(f.filename));
+          pagesAfterPatches = r.updatedPages;
+        }
+        // Corruption check: a patch's REPLACE side occasionally contains leftover
+        // `<<<<<<< SEARCH` / `=======` / `>>>>>>> REPLACE` markers, dumping them
+        // into the saved file and silently breaking the page. Detect and force
+        // a clean FULL FILE rewrite of the affected file(s).
+        const CORRUPTION_RE = /^[ \t]*(<{5,}\s*SEARCH|>{5,}\s*REPLACE|={7,}\s*$)/m;
+        for (const [filename, content] of Object.entries(pagesAfterPatches)) {
+          const original = currentPages[filename] || '';
+          if (CORRUPTION_RE.test(content) && !CORRUPTION_RE.test(original)) {
+            failedFiles.add(filename);
+          }
         }
         console.log(`[chat] recovery-check edits=${Object.keys(edits).length} regions=${regions.length} pages=${Object.keys(currentPages).length} failed=${[...failedFiles].join(',') || 'none'}`);
         if (failedFiles.size > 0) {
@@ -422,7 +482,7 @@ router.post('/', async (req, res, next) => {
             { role: 'assistant', content: assistantSoFar },
             {
               role: 'user',
-              content: `Your patch block(s) for ${list.join(', ')} couldn't be applied (either the SEARCH text didn't byte-match the current file, or the REGION target element wasn't found). Re-emit the affected file(s) in FULL FILE MODE — complete \`<!-- FILE: filename -->\` block(s) with the full \`<!DOCTYPE html>\`…\`</html>\` document, with all of your intended changes already applied. Only emit the file(s) listed; do NOT touch any others.`,
+              content: `Your patch block(s) for ${list.join(', ')} couldn't be applied cleanly (either the SEARCH text didn't byte-match the current file, the REGION target element wasn't found, or the resulting file contains leftover \`<<<<<<< SEARCH\` / \`=======\` / \`>>>>>>> REPLACE\` markers from a malformed REPLACE block). Re-emit the affected file(s) in FULL FILE MODE — complete \`<!-- FILE: filename -->\` block(s) with the full \`<!DOCTYPE html>\`…\`</html>\` document, with all of your intended changes already applied. The emitted HTML must contain NO patch-marker text whatsoever. Only emit the file(s) listed; do NOT touch any others.`,
             },
           ];
           const turn = await runTurn(followUpMessages);

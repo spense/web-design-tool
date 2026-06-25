@@ -2,7 +2,7 @@ import React from 'react';
 import { classifyElement } from '../inlineEdit/selectionUtils.js';
 import { computeElementSpecs } from '../inlineEdit/specs.js';
 import {
-  IconImage, IconPencil, IconSparkles, IconWand, IconTrash,
+  IconImage, IconPencil, IconSparkles, IconWand, IconTrash, IconLink,
 } from '../inlineEdit/icons.jsx';
 
 // Condensed breadcrumb label — tag + optional #id only (no classes).
@@ -53,6 +53,10 @@ export default function SelectionToolbar({
   }
   // Prompt is redundant for SVG (Replace SVG already has a prompt field).
   if (!klass.isSvg) actions.push({ id: 'prompt-change', Icon: IconWand, label: 'Prompt' });
+  // Edit Link only for <a> elements with an href — retargets the link
+  // without going through chat. Picks from project pages or accepts a
+  // manual URL (relative or absolute).
+  if (klass.isLink) actions.push({ id: 'edit-link', Icon: IconLink, label: 'Edit Link' });
   if (klass.isRemovable) actions.push({ id: 'remove', Icon: IconTrash, label: 'Remove' });
 
   return (

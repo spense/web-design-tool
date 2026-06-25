@@ -3,6 +3,7 @@ import Spinner from './Spinner.jsx';
 import ToolsMenu from './ToolsMenu.jsx';
 import SelectionToolbar from './SelectionToolbar.jsx';
 import SelectionPanel from './SelectionPanel.jsx';
+import EditLinkDialog from './EditLinkDialog.jsx';
 import { IconPointer } from '../inlineEdit/icons.jsx';
 import { commitInlineEdit } from '../inlineEdit/commit.js';
 import { extractTokens } from '../tokenRewriter.js';
@@ -11,6 +12,8 @@ import {
   resolveSelectorPath,
   getElementChain,
   isSelectable,
+  isVisuallyHidden,
+  topSelectableAt,
   fingerprintElement,
   matchesFingerprint,
 } from '../inlineEdit/selectionUtils.js';
@@ -23,10 +26,8 @@ const VIEWPORTS = {
 
 export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, activeColor, activeFont, slug, project, onFaviconChange, onOgImageChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo, onInlinePrompt }) {
   const [viewport, setViewport] = useState('desktop');
-  const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const iframeRef = useRef(null);
-  const pageDropdownRef = useRef(null);
   const savedScrollRef = useRef(0);
   // When a cross-page hash link (e.g. services.html#fabrication) is clicked,
   // we switch the active page (which reloads the iframe) and stash the target
@@ -55,6 +56,11 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   const [selectionRect, setSelectionRect] = useState(null);
   // Which inline action is currently open in the panel.
   const [activeAction, setActiveAction] = useState(null);
+  // Edit Link dialog: opened from the SelectionToolbar's link action. Holds
+  // the link's current href so the dialog can pre-fill the Custom field
+  // with the existing value when the user wants to tweak it.
+  const [linkEditOpen, setLinkEditOpen] = useState(false);
+  const [linkEditHref, setLinkEditHref] = useState('');
 
   const selectModeRef = useRef(selectMode);
   selectModeRef.current = selectMode;
@@ -110,17 +116,6 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     onApplyTokens(newPages, projectPatch);
   };
 
-  // Close page dropdown on outside click (parent doc).
-  useEffect(() => {
-    if (!pageMenuOpen) return;
-    const onDoc = (e) => {
-      if (pageDropdownRef.current && !pageDropdownRef.current.contains(e.target)) {
-        setPageMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [pageMenuOpen]);
 
   // Translate an iframe-viewport rect into PARENT viewport coordinates.
   const translateRect = useCallback((rect) => {
@@ -181,7 +176,6 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   // clicks anywhere inside the iframe (parent doc's mousedown listener can't
   // see clicks inside a child document).
   const closeAllPopovers = () => {
-    setPageMenuOpen(false);
     setToolsOpen(false);
   };
   useEffect(() => {
@@ -344,6 +338,13 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
           return;
         }
         let target = e.target;
+        // If the topmost hit is a legitimately-hidden surface (closed mobile
+        // overlay, stashed drawer) that the global pointer-events override
+        // re-enabled, walk down to the next selectable element underneath.
+        if (target === hoverEl || target === activeEl || !isSelectable(target, doc) || isVisuallyHidden(target)) {
+          const fallback = topSelectableAt(doc, e.clientX, e.clientY);
+          if (fallback) target = fallback;
+        }
         // Clicking/hovering an icon's internals (path, g, …) should highlight
         // the whole <svg>, not the inner node.
         const svgRoot = target.closest && target.closest('svg');
@@ -392,6 +393,13 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
           }
         } else {
           lastAltClick = { x: -1, y: -1, idx: -1 };
+          // Same fallback as onMouseMove: if the topmost hit is a hidden
+          // overlay re-enabled by the select-mode pointer-events override,
+          // walk to the next visible selectable element underneath.
+          if (!isSelectable(target, doc) || isVisuallyHidden(target)) {
+            const fallback = topSelectableAt(doc, e.clientX, e.clientY);
+            if (fallback) target = fallback;
+          }
         }
 
         // Selecting any part of an icon resolves to the whole <svg>.
@@ -486,7 +494,12 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
       const t = e.target;
       if (!t) return;
       if (iframeRef.current && t === iframeRef.current) return;
-      if (t.closest && (t.closest('.selection-toolbar') || t.closest('.selection-panel'))) return;
+      // Protect modal dialogs (Edit Link, etc.) — they're rendered outside
+      // the iframe and the selection chrome, so without this exemption every
+      // click inside the dialog would clear the very selection the dialog
+      // is about to mutate. `.modal-backdrop` covers any current/future
+      // modal that reuses the standard overlay class.
+      if (t.closest && (t.closest('.selection-toolbar') || t.closest('.selection-panel') || t.closest('.modal-backdrop'))) return;
       clearSelection();
     };
     document.addEventListener('mousedown', onMouseDown, true);
@@ -581,26 +594,6 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
               )}
             </svg>
           </button>
-          {pageNames.length > 1 && (
-            <div className="page-dropdown" ref={pageDropdownRef}>
-              <button className="with-caret" onClick={() => setPageMenuOpen(o => !o)}>
-                {activePage}
-              </button>
-              {pageMenuOpen && (
-                <div className="page-dropdown-list">
-                  {pageNames.map(name => (
-                    <button
-                      key={name}
-                      className={name === activePage ? 'active' : ''}
-                      onClick={() => { onActivePage(name); setPageMenuOpen(false); }}
-                    >
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
           <div className="tools-wrap">
             <button className="with-caret" onClick={() => setToolsOpen(o => !o)} disabled={!html} title="Theme tools">
               Tools
@@ -663,6 +656,11 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
           </div>
         </div>
         <div className="right">
+          {pageNames.length > 0 && (
+            <span className="page-label" title="Active page — switch via the page picker in the chat panel">
+              {activePage}
+            </span>
+          )}
           <button onClick={openFullScreen} disabled={!html} title="Open in new browser tab">Full screen ↗</button>
           <button className="primary" onClick={onExport} disabled={!html || exporting}>
             {exporting ? <><Spinner /> Exporting…</> : 'Export'}
@@ -720,6 +718,16 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 }
                 onApplyTokens({ ...pages, [activePage]: newHtml });
                 clearSelection();
+                return;
+              }
+              if (actionId === 'edit-link') {
+                // Open the EditLinkDialog seeded with the anchor's current
+                // href. The mutation happens in the dialog's onApply path
+                // below, not here — keeps the action menu thin.
+                const el = chain[chainIndex];
+                if (!el || el.tagName !== 'A') return;
+                setLinkEditHref(el.getAttribute('href') || '');
+                setLinkEditOpen(true);
                 return;
               }
               if (actionId === 'prompt-change') {
@@ -834,6 +842,30 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
             }}
           />
         )}
+        <EditLinkDialog
+          open={linkEditOpen}
+          onClose={() => setLinkEditOpen(false)}
+          currentHref={linkEditHref}
+          pages={pages}
+          currentPage={activePage}
+          onApply={(nextHref) => {
+            // Mutate the selected <a>'s href via the same commitInlineEdit
+            // pipeline every other action uses — keeps history / persistence
+            // / re-selection behavior consistent.
+            const newHtml = commitInlineEdit({
+              sourceHtml: pages?.[activePage] || '',
+              selectorPath,
+              mutator: (target) => {
+                if (target.tagName === 'A') target.setAttribute('href', nextHref);
+              },
+            });
+            if (!newHtml) {
+              console.warn('[edit-link] commit failed: could not resolve element');
+              return;
+            }
+            onApplyTokens({ ...pages, [activePage]: newHtml });
+          }}
+        />
       </div>
     </div>
   );

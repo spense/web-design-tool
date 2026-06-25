@@ -33,6 +33,37 @@ async function readJson(p, fallback) {
   }
 }
 
+// Session schema v2: { schemaVersion: 2, threads: { __site: [], "index.html": [...] } }
+// v1 was { messages: [...] } — a single thread.
+//
+// Migration rule: v1 messages move into the "index.html" thread (preserves the
+// no-regression behavior of seeing prior chat when opening an existing project).
+// __site starts empty. The site-thread is the cross-page / theme conversation.
+export const SITE_THREAD = '__site';
+export function normalizeSession(raw, pageNames = []) {
+  // Already v2 shape.
+  if (raw && raw.schemaVersion === 2 && raw.threads && typeof raw.threads === 'object') {
+    const threads = { ...raw.threads };
+    if (!Array.isArray(threads[SITE_THREAD])) threads[SITE_THREAD] = [];
+    // Ensure every existing page has at least an empty thread slot.
+    for (const name of pageNames) {
+      if (!Array.isArray(threads[name])) threads[name] = [];
+    }
+    return { changed: false, session: { schemaVersion: 2, threads } };
+  }
+  // v1 or empty.
+  const prev = Array.isArray(raw?.messages) ? raw.messages : [];
+  const threads = { [SITE_THREAD]: [] };
+  // Drop prior messages into index.html if it exists, otherwise leave them
+  // attached to index.html anyway — projects always have an index page once
+  // they've been generated, and an empty-pages project has no prior messages.
+  threads['index.html'] = prev;
+  for (const name of pageNames) {
+    if (!threads[name]) threads[name] = [];
+  }
+  return { changed: true, session: { schemaVersion: 2, threads } };
+}
+
 async function writeJson(p, data) {
   await fs.mkdir(path.dirname(p), { recursive: true });
   await fs.writeFile(p, JSON.stringify(data, null, 2), 'utf8');
@@ -56,7 +87,22 @@ export async function getProject(slug) {
   const project = await readJson(path.join(dir, 'project.json'), null);
   if (!project) return null;
   const pages = await readJson(path.join(dir, 'pages.json'), {});
-  const session = await readJson(path.join(dir, 'session.json'), { messages: [] });
+  const rawSession = await readJson(path.join(dir, 'session.json'), null);
+  const pageNames = Object.keys(pages);
+  const { changed, session } = normalizeSession(rawSession, pageNames);
+  if (changed) {
+    // Persist the migrated shape so subsequent reads are fast.
+    await writeJson(path.join(dir, 'session.json'), session);
+    // For v1→v2 migrations, seed lastScope to the thread that received the
+    // migrated messages, so existing projects open into their visible chat
+    // (no regression for the user). Only set if not already present.
+    if (!project.lastScope) {
+      const populated = Object.entries(session.threads || {})
+        .find(([k, v]) => k !== SITE_THREAD && Array.isArray(v) && v.length > 0);
+      project.lastScope = populated ? populated[0] : SITE_THREAD;
+      await writeJson(path.join(dir, 'project.json'), project);
+    }
+  }
   return { project, pages, session };
 }
 
@@ -80,11 +126,12 @@ export async function createProject({ name }) {
   };
   await writeJson(path.join(projectDir(slug), 'project.json'), project);
   await writeJson(path.join(projectDir(slug), 'pages.json'), {});
-  await writeJson(path.join(projectDir(slug), 'session.json'), { messages: [] });
-  return { project, pages: {}, session: { messages: [] } };
+  const session = { schemaVersion: 2, threads: { [SITE_THREAD]: [], 'index.html': [] } };
+  await writeJson(path.join(projectDir(slug), 'session.json'), session);
+  return { project, pages: {}, session };
 }
 
-export async function saveProject(slug, { project, pages, session, skipHistory }) {
+export async function saveProject(slug, { project, pages, session, skipHistory, activeThread }) {
   const dir = projectDir(slug);
   const now = new Date().toISOString();
   if (project) {
@@ -110,10 +157,28 @@ export async function saveProject(slug, { project, pages, session, skipHistory }
   }
   if (session) await writeJson(path.join(dir, 'session.json'), session);
   if (pagesChanged && !skipHistory) {
+    // Resolve lastMessage from the just-touched thread; fall back to scanning
+    // all threads for the most recent message if no thread hint was provided
+    // (e.g. an older client). Always tolerate the legacy v1 shape.
+    let lastMessage = null;
+    if (session?.threads && activeThread && Array.isArray(session.threads[activeThread])) {
+      const arr = session.threads[activeThread];
+      lastMessage = arr[arr.length - 1] || null;
+    } else if (session?.threads) {
+      let newest = null;
+      for (const arr of Object.values(session.threads)) {
+        if (!Array.isArray(arr)) continue;
+        const m = arr[arr.length - 1];
+        if (m && (!newest || (m.timestamp || '') > (newest.timestamp || ''))) newest = m;
+      }
+      lastMessage = newest;
+    } else if (Array.isArray(session?.messages)) {
+      lastMessage = session.messages[session.messages.length - 1] || null;
+    }
     await writeJson(path.join(dir, 'history', `${now.replace(/[:.]/g, '-')}.json`), {
       timestamp: now,
       pages,
-      lastMessage: session?.messages?.[session.messages.length - 1] || null,
+      lastMessage,
     });
   }
 }

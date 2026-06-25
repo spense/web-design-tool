@@ -49,8 +49,8 @@ router.get('/:slug', async (req, res, next) => {
 
 router.put('/:slug', async (req, res, next) => {
   try {
-    const { project, pages, session, skipHistory } = req.body || {};
-    await saveProject(req.params.slug, { project, pages, session, skipHistory });
+    const { project, pages, session, skipHistory, activeThread } = req.body || {};
+    await saveProject(req.params.slug, { project, pages, session, skipHistory, activeThread });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

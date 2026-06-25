@@ -58,7 +58,8 @@ STYLE CONVENTIONS:
 - Omit width/height on the root <svg>; let CSS control sizing.
 - Single root <svg> only.
 - Keep paths clean and aligned to the viewBox grid.
-- If the user provides a reference SVG, match its style (line vs filled, stroke width, viewBox) unless they explicitly ask to change it.`,
+- NEVER use CSS custom properties (var(...)). Always use currentColor for stroke and fill colors — never var(--color-accent) or similar. The icon inherits color from its parent via currentColor.
+- If the user provides a reference SVG, match its style (line vs filled, stroke width, viewBox) unless they explicitly ask to change it. If the reference uses var(...) for colors, replace them with currentColor in your output.`,
       messages: [{
         role: 'user',
         content: currentSvg
