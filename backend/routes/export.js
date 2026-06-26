@@ -6,6 +6,7 @@ import { getProject, projectDir } from '../storage.js';
 import { extractAndDedupCss } from '../cssExtractor.js';
 import { buildMonogramSvg, isImportedPlaceholder } from '../faviconSvg.js';
 import { cleanupUnusedImages } from '../pixabay.js';
+import { serializeEmbedsForExport } from '../embeds.js';
 
 const router = Router();
 
@@ -206,6 +207,19 @@ async function runExport(slug, project, pages, session) {
     if (ogImageFile) {
       await fs.mkdir(exportAssetsDir, { recursive: true });
       await fs.copyFile(ogImageFile.src, path.join(exportAssetsDir, ogImageFile.exportName));
+    }
+
+    // Sidecar embed manifest. The design-engine reads this directly to
+    // componentize embeds into Astro layouts/pages — embed code never
+    // appears in the exported HTML. Skip the write when the project has
+    // no embeds so empty exports stay clean.
+    const exportEmbeds = serializeEmbedsForExport(project.embeds);
+    if (exportEmbeds.length > 0) {
+      await fs.writeFile(
+        path.join(exportDir, 'embeds.json'),
+        JSON.stringify({ embeds: exportEmbeds }, null, 2),
+        'utf8',
+      );
     }
 
     return {

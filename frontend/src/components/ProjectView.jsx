@@ -188,6 +188,14 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
       const { [action.name]: _t, ...restThreads } = prevThreads;
       session = { schemaVersion: 2, threads: restThreads };
       if (activeScope === action.name) nextScope = 'index.html';
+      // Strip page-scoped embeds targeting the removed page so they don't
+      // become orphans (invisible to the popover but still on project.embeds).
+      if (Array.isArray(project.embeds) && project.embeds.length > 0) {
+        const surviving = project.embeds.filter(e => !(e.scope === 'page' && e.page === action.name));
+        if (surviving.length !== project.embeds.length) {
+          project = { ...project, embeds: surviving };
+        }
+      }
     } else {
       return;
     }
@@ -249,6 +257,16 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     if (!data) return;
     setData(d => d ? { ...d, project: { ...d.project, ogImage } } : d);
   }, [data]);
+
+  // Embeds live on project.embeds — single array, no per-page splatting in
+  // pages.json. The preview/export resolve which embeds apply to which page
+  // at render time. Skip history snapshots: adding a Calendly embed isn't a
+  // design change worth undo/redo'ing pages around.
+  const handleEmbedsChange = useCallback((nextEmbeds) => {
+    if (!data) return;
+    const nextProject = { ...data.project, embeds: nextEmbeds };
+    persist({ ...data, project: nextProject }, { skipHistory: true });
+  }, [data, persist]);
 
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
@@ -429,6 +447,7 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
           onStreamingChange={onStreamingChange}
           inlineScope={inlineScope}
           onClearInlineScope={() => setInlineScope(null)}
+          onEmbedsChange={handleEmbedsChange}
         />
       )}
       <PreviewPanel

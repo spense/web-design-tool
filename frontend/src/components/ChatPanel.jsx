@@ -5,6 +5,7 @@ import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, editSt
 import { calculateCost, totalCost, formatCost } from '../pricing.js';
 import Spinner from './Spinner.jsx';
 import AddPageDialog from './AddPageDialog.jsx';
+import EmbedPopover from './EmbedPopover.jsx';
 
 const MODELS = [
   { value: 'sonnet', label: 'Sonnet 4.6' },
@@ -24,7 +25,7 @@ function formatDuration(secs) {
 // Mirror of backend SITE_THREAD constant.
 const SITE_THREAD = '__site';
 
-export default function ChatPanel({ project, pages, messages, sessionTotal, activePage, activeScope, onScopeChange, onPagesAction, onUpdate, hasApiKey, onStreamingChange, inlineScope, onClearInlineScope }) {
+export default function ChatPanel({ project, pages, messages, sessionTotal, activePage, activeScope, onScopeChange, onPagesAction, onUpdate, hasApiKey, onStreamingChange, inlineScope, onClearInlineScope, onEmbedsChange }) {
   const [input, setInput] = useState('');
   const [model, setModel] = useState(project.lastModel || 'sonnet');
   const [streaming, setStreaming] = useState(false);
@@ -664,6 +665,8 @@ export default function ChatPanel({ project, pages, messages, sessionTotal, acti
         disabled={streaming}
         currentPages={pages}
         onPagesAction={onPagesAction}
+        embeds={project?.embeds || []}
+        onEmbedsChange={onEmbedsChange}
       />
       <div className="chat-messages" ref={messagesRef} onScroll={handleMessagesScroll}>
         {messages.length === 0 && !streaming && !crawling && !imagePoolStatus && (
@@ -826,7 +829,7 @@ export default function ChatPanel({ project, pages, messages, sessionTotal, acti
 //   - 2+ pages: dropdown lists "All Pages" (SITE_THREAD) + every page file.
 //
 // The page-actions ellipsis (Add / Duplicate / Delete) hides until pages exist.
-function ScopeBar({ pages, activeScope, onScopeChange, disabled, currentPages, onPagesAction }) {
+function ScopeBar({ pages, activeScope, onScopeChange, disabled, currentPages, onPagesAction, embeds, onEmbedsChange }) {
   const [open, setOpen] = useState(false);
   // Page dialog: same component handles both Add and Duplicate, differentiated
   // by `dialogKind`. Duplicate uses the active scope as the source page (or
@@ -834,6 +837,7 @@ function ScopeBar({ pages, activeScope, onScopeChange, disabled, currentPages, o
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogKind, setDialogKind] = useState('add');
   const [dialogSource, setDialogSource] = useState(null);
+  const [embedOpen, setEmbedOpen] = useState(false);
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -922,6 +926,28 @@ function ScopeBar({ pages, activeScope, onScopeChange, disabled, currentPages, o
         </div>
       </div>
       <div className="scope-bar-right">
+        {hasPages && onEmbedsChange && (
+          <div className="embed-wrap">
+            <button
+              type="button"
+              className={`scope-actions-btn embed-btn${embedOpen ? ' active' : ''}`}
+              onClick={() => setEmbedOpen(o => !o)}
+              disabled={disabled}
+              title="Manage embed code"
+              aria-label="Manage embed code"
+            >
+              <EmbedIcon />
+            </button>
+            {embedOpen && (
+              <EmbedPopover
+                embeds={embeds}
+                activeScope={activeScope}
+                onChange={onEmbedsChange}
+                onClose={() => setEmbedOpen(false)}
+              />
+            )}
+          </div>
+        )}
         {hasPages && (
           <ScopeActionsMenu
             disabled={disabled}
@@ -993,6 +1019,14 @@ function ScopeActionsMenu({ disabled, onAdd, onDuplicate, onDelete }) {
   );
 }
 
+function EmbedIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="16 18 22 12 16 6" />
+      <polyline points="8 6 2 12 8 18" />
+    </svg>
+  );
+}
 function PlusIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

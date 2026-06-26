@@ -7,6 +7,7 @@ import EditLinkDialog from './EditLinkDialog.jsx';
 import { IconPointer } from '../inlineEdit/icons.jsx';
 import { commitInlineEdit } from '../inlineEdit/commit.js';
 import { extractTokens } from '../tokenRewriter.js';
+import { injectEmbeds, resolveEmbedsForPage } from '../embeds.js';
 import {
   getSelectorPath,
   resolveSelectorPath,
@@ -74,7 +75,10 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
 
   const pageNames = Object.keys(pages || {});
   const rawHtml = pages?.[activePage] || '';
-  const html = rawHtml ? rewriteUploadsUrls(rawHtml, slug) : '';
+  const withEmbeds = rawHtml
+    ? injectEmbeds(rawHtml, resolveEmbedsForPage(project?.embeds, activePage))
+    : '';
+  const html = withEmbeds ? rewriteUploadsUrls(withEmbeds, slug) : '';
 
   // Sync displayHtml whenever the underlying html changes (chat responses,
   // page switches, tools changes, undo/redo).
