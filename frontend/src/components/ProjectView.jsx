@@ -9,6 +9,7 @@ import { bindNavLabelInPages, unbindNavLabelInPages } from '../navBinding.js';
 import {
   buildMonogramSvg, chooseParams, renderAllFromSvg,
 } from '../faviconRender.js';
+import { normalizeAnimations, EFFECT_KEYS } from '../animations.js';
 
 // Mirror of backend SITE_THREAD constant. The thread key for project-wide /
 // cross-page conversations ("Main Chat"). All other thread keys are page
@@ -240,9 +241,15 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     persist({ ...data, pages: newPages, project });
   }, [data, persist]);
 
-  const handleScrollAnimationsChange = useCallback((on) => {
+  const handleAnimationChange = useCallback((key, on) => {
     if (!data) return;
-    persist({ ...data, project: { ...data.project, scrollAnimations: on } });
+    if (!EFFECT_KEYS.includes(key)) return;
+    const current = normalizeAnimations(data.project);
+    const nextAnimations = { ...current, [key]: !!on };
+    // Drop the legacy scrollAnimations boolean once the user touches any
+    // toggle — the new `animations` object becomes the source of truth.
+    const { scrollAnimations: _legacy, ...projectRest } = data.project;
+    persist({ ...data, project: { ...projectRest, animations: nextAnimations } });
   }, [data, persist]);
 
   const handleFaviconChange = useCallback((favicon) => {
@@ -465,8 +472,8 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
         project={data.project}
         onFaviconChange={handleFaviconChange}
         onOgImageChange={handleOgImageChange}
-        scrollAnimations={data.project.scrollAnimations !== false}
-        onScrollAnimationsChange={handleScrollAnimationsChange}
+        animations={normalizeAnimations(data.project)}
+        onAnimationChange={handleAnimationChange}
         chatCollapsed={chatCollapsed}
         onToggleChatCollapsed={() => setChatCollapsed(c => !c)}
         canUndo={canUndo}

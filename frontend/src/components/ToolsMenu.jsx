@@ -4,15 +4,30 @@ import {
   buildSizingTokens, buildSpacingTokens, pickCategory,
 } from '../themePresets.js';
 import { extractTokens, extractGoogleFontsQuery, applyToAllPages } from '../tokenRewriter.js';
+import { EFFECT_KEYS, EFFECT_LABELS } from '../animations.js';
+import Toggle from './Toggle.jsx';
 import FaviconSection from './FaviconSection.jsx';
 import OgImageSection from './OgImageSection.jsx';
 
-const ANIMATION_OPTIONS = [
-  { id: 'on', label: 'On' },
-  { id: 'off', label: 'Off' },
-];
+// Cheap markup-only detection: which effects does the active page's HTML use?
+// Returns an object keyed by EFFECT_KEYS with booleans. Used to dim toggle
+// rows when the model didn't apply that effect to the current page.
+function detectEffectsInHtml(html) {
+  const present = {};
+  for (const k of EFFECT_KEYS) present[k] = false;
+  if (!html) return present;
+  // fade-in: bare `animate-in` not followed by `-` (so we don't match
+  // animate-in-up etc., which are the reveal-direction variants).
+  if (/class=["'][^"']*\banimate-in(?![-\w])/.test(html)) present.fadeIn = true;
+  if (/\banimate-in-(?:up|left|right|scale|blur|stagger)\b/.test(html)) present.reveal = true;
+  if (/\bparallax-bg\b|\bdata-parallax\b/.test(html)) present.parallax = true;
+  if (/\bsticky-eyebrow\b/.test(html)) present.sticky = true;
+  if (/\bdata-countup\b/.test(html)) present.countUp = true;
+  if (/\bmarquee-strip\b/.test(html)) present.marquee = true;
+  return present;
+}
 
-export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onApply, activeColor = 'default', activeFont = 'original', onClose, slug, project, onFaviconChange, onOgImageChange, scrollAnimations, onScrollAnimationsChange }) {
+export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onApply, activeColor = 'default', activeFont = 'original', onClose, slug, project, onFaviconChange, onOgImageChange, animations, onAnimationChange }) {
   const ref = useRef(null);
   const html = pages?.[activePage] || (pages ? Object.values(pages)[0] : '');
   const tokens = extractTokens(html) || {};
@@ -174,11 +189,11 @@ export default function ToolsMenu({ pages, activePage, snapshot, onSnapshot, onA
       </div>
 
       <div className="tools-section">
-        <div className="tools-label">Scroll animations</div>
-        <Segment
-          options={ANIMATION_OPTIONS}
-          activeId={scrollAnimations === false ? 'off' : 'on'}
-          onPick={(o) => onScrollAnimationsChange?.(o.id === 'on')}
+        <div className="tools-label">Animations</div>
+        <AnimationToggles
+          html={html}
+          animations={animations}
+          onAnimationChange={onAnimationChange}
         />
       </div>
 
@@ -228,6 +243,31 @@ function ColorOption({ theme, tokens, snapshot, active, onClick }) {
       </span>
       <span className="tools-swatch-label">{theme.label}</span>
     </button>
+  );
+}
+
+function AnimationToggles({ html, animations, onAnimationChange }) {
+  // Detect which effects the active page's markup uses. Recompute on every
+  // html change — cheap, and keeps the dimmed rows in sync after chat edits.
+  const present = useMemo(() => detectEffectsInHtml(html), [html]);
+  const safe = animations || {};
+  return (
+    <div className="tools-toggles">
+      {EFFECT_KEYS.map(key => {
+        const inPage = !!present[key];
+        return (
+          <div key={key} className={`tools-toggle-row${inPage ? '' : ' is-off'}`}>
+            <span className="label">{EFFECT_LABELS[key]}</span>
+            <Toggle
+              checked={!!safe[key]}
+              onChange={(v) => onAnimationChange?.(key, v)}
+              disabled={!inPage}
+              label={EFFECT_LABELS[key]}
+            />
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

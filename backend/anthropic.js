@@ -256,11 +256,15 @@ Available archetypes:
 
 \`asymmetric-overlap\` — Content blocks deliberately overlap or break out of their grid lines. Images extend past column boundaries, cards use negative margins, z-index layering is a core visual device. The most dynamic and layered option.
 
+\`product-spotlight\` — The product interface, output, or capability is the primary visual in every section — not a decorative element placed beside text. Hero is a composed graphic moment with no prescribed formula; eyebrow tags, metrics strips, and social-proof lips are explicitly excluded from the hero. Feature sections are built to frame product UI or demo graphics at their native proportions; copy supports and contextualizes rather than competing for visual weight. Sections vary deliberately in container width, density, and background treatment — dense capability grids, full-bleed contrast bands, and narrow centered copy sections alternate to create rhythm. Full-bleed contrast sections are used sparingly (1–2 maximum) for conversion or social proof anchors. Integration and ecosystem sections receive intentional compositional treatment rather than a plain logo grid. Anti-patterns: alternating image/text rows as the default section structure; uniform card grids where every card carries identical visual weight; sections that repeat the same spacing density throughout the page.
+
 Natural blends (use when a single archetype doesn't fully serve the page):
 - \`split-screen-dual\` + \`editorial\` → editorial scroll with sticky conversion panel
 - \`fullwidth-media-bands\` + \`data-forward-stats\` → dramatic imagery interleaved with bold credibility numbers
 - \`modular-blocks\` + \`data-forward-stats\` → information-dense dashboard with prominent metrics
 - \`asymmetric-overlap\` + \`editorial\` → layered, dynamic composition with narrative depth
+- \`product-spotlight\` + \`asymmetric-overlap\` → product UI that breaks out of its container, with overlapping text blocks and negative-margin cards creating a layered, dynamic feel around the interface
+- \`product-spotlight\` + \`data-forward-stats\` → product capability anchored by oversized metrics; proof through both demonstration and numbers in the same layout
 
 Choose the archetype based on the business's goals, content strengths, and what the site needs to accomplish — not based on industry or business type. Any archetype can work for any business when adapted thoughtfully.
 
@@ -432,41 +436,34 @@ The "trigger" is the button that opens a hidden menu (a hamburger, an "X", a cus
 
 10. *Default to standard responsive unless the design brief, the user's language, or the site's character points elsewhere.* The user can override at any time ("use a drawer menu on desktop too", "use a thin two-line icon", "make the trigger always visible", "make it a centered modal").
 
-Scroll entrance animations — REQUIRED:
+Animation effects — the framework provides the runtime, you choose the markup:
 
-Every design must include a lightweight scroll-reveal system using the Intersection Observer API (no external libraries). Add these to the inline \`<style>\` block:
+The Cinder framework injects the animation CSS and JavaScript runtime into every page at preview and export time. **Do NOT** include any inline \`.animate-in\` CSS rules or IntersectionObserver script — they are provided automatically. Your only job is to add the right classes and data attributes to the markup. The user toggles each effect on/off site-wide in the Tools menu; you decide which sections/elements would benefit from each effect based on the content.
 
-\`\`\`css
-.animate-in {
-  opacity: 0;
-  transform: translate3d(0, 24px, 0);
-  transition: opacity 0.6s ease 0.25s, transform 0.6s ease 0.25s;
-}
-.animate-in.visible {
-  opacity: 1;
-  transform: none;
-}
-\`\`\`
+There are six effects available. Five of them are off by default; fade-in is on by default. Use them with intent and class, not gratuitously.
 
-And add this script before \`</body>\`:
+**1. Fade-in (\`animate-in\`)** — the default reveal for most content. Apply to individual content elements that aren't above-the-fold: large headlines below the hero, body paragraphs, callout cards, service cards, testimonials, standalone imagery. Good candidates: hero subtext, individual cards, stat figures, standalone text blocks. Poor candidates: background images, full section wrappers, nav elements, footers, and any above-the-fold hero element that's visible on page load. Not every section needs an entrance; not every element within an animated section needs one.
 
-\`\`\`html
-<script>
-const observer = new IntersectionObserver((entries) => {
-  entries.forEach(e => {
-    if (e.isIntersecting) {
-      e.target.classList.add('visible');
-      observer.unobserve(e.target);
-    }
-  });
-}, { threshold: 0, rootMargin: '0px 0px -10% 0px' });
-document.querySelectorAll('.animate-in').forEach(el => observer.observe(el));
-</script>
-\`\`\`
+**2. Scroll-reveal direction variants** — use SPARINGLY to vary rhythm across a long page. Each variant replaces \`animate-in\` for that element (they are mutually exclusive — never both on the same element):
+- \`animate-in-up\` — same as fade-in but explicit
+- \`animate-in-left\` / \`animate-in-right\` — slide in horizontally; useful for two-column splits where each side enters from its outer edge
+- \`animate-in-scale\` — subtle scale-in (0.92 → 1.0); good for hero callouts or feature cards
+- \`animate-in-blur\` — blurs in; reserve for cinematic moments (premium feel, use rarely)
+- \`animate-in-stagger\` — applied to a PARENT (e.g., a grid of cards). The parent's children inherit a staggered delay (children should still carry their own \`animate-in*\` class). Use on grids of 2–8 children.
 
-The \`observer.unobserve(e.target)\` call ensures each element animates in exactly once on first scroll into view and never replays.
+**3. Parallax (\`parallax-bg\` and \`data-parallax\`)** — depth via scroll-rate divergence. Two flavors:
+- \`parallax-bg\` on a \`<section>\` (or block-level container) that carries the background image directly — the bg moves slower than scroll, creating classic parallax depth. The section's text content scrolls normally over it. The runtime lifts the element's \`background-image\` into a pseudo-element it can transform independently, so the image MUST be applied to the same element that has the \`parallax-bg\` class — either inline (\`style="background-image: url(...)"\`) or via a CSS rule targeting that element. Do NOT put \`parallax-bg\` on an empty background-only wrapper div sitting behind sibling overlay/content layers; put it on the section that contains the content, and use a \`::before\`/overlay child for any darkening tint.
+- \`data-parallax="<speed>"\` on any element — that element scrolls at a different rate. Values: 1 = normal scroll; <1 = slower (recedes); >1 = faster (floats forward). Typical: 0.6–0.85. Use on side-by-side card pairs to create 3D depth without any background image (e.g., a left card with data-parallax="0.7" and a right card with data-parallax="0.9"). Multiple parallax sections per page are fine when they reinforce each other; avoid stacking competing ones that fight visually. The runtime auto-disables parallax on touch devices and narrow viewports, so the layout must still look right as a normal static stack on mobile.
 
-Apply \`animate-in\` thoughtfully to individual content elements — NOT to section containers or wrapper \`<div>\`s. Good candidates: hero headlines, hero subtext, hero images or illustration elements, large standalone text blocks, callout cards, stat figures, individual service cards, testimonial blocks, and standalone imagery. Poor candidates: background images, full section wrappers, nav elements, footers, and any element that would be visible on page load without scrolling (above-the-fold hero content should generally NOT have animate-in since it's visible immediately). Use creative judgment about which elements benefit from an entrance — not every section needs animation, and not every element within an animated section needs it. The goal is purposeful motion that enhances the design, not blanket animation of everything.
+**4. Sticky eyebrow (\`sticky-eyebrow\`)** — a small label/heading that pins to the top of its enclosing section while the section's content scrolls past. Use only on sections with substantial vertical content (multi-paragraph copy, long lists, multi-step explanations) — short sections will not show any pinning behavior. Apply to a small heading or label INSIDE the section, not to the section itself.
+
+**5. Count-up stats (\`data-countup\`)** — a number that animates from 0 to its final value when it enters view. Apply ONLY to numeric stat blocks: KPIs, metrics, social proof ("500+", "98%", "10x"). Never on prices, dates, addresses, phone numbers, or arbitrary numerals in body copy. Use \`data-countup="42"\` for the target value; the element's text content is replaced at runtime. Add \`data-countup-suffix="%"\` or \`data-countup-suffix="+"\` when the visible value carries a suffix.
+
+**6. Marquee (\`marquee-strip\`)** — continuous horizontal auto-scroll. Use only for naturally strip-shaped content: client/partner logo bars, a "what we do" word strip, a key-benefits row. The runtime duplicates the content for a seamless loop; pause on hover is automatic. Maximum one marquee per page. Marquee items must be inherently short (logos, single words, short phrases) — long sentences look broken when scrolling.
+
+**Mutual exclusion per section.** A given section uses either fade-in OR a specialty effect — never both on the same element. A parallax section's text content doesn't also fade in; a marquee strip doesn't also have count-ups. Fade-in is the safe default for sections that don't warrant a specialty effect.
+
+**Mobile/tablet awareness.** Choose effects that survive responsive collapse. Don't apply sticky-eyebrow on sections short enough to fit in a single mobile viewport. Side-by-side parallax cards must still look right when they stack vertically on mobile (the runtime turns parallax off on touch devices automatically, but the layout still needs to work). Marquees stay horizontal across breakpoints — keep content short.
 
 What NOT to include in the HTML:
 - No "Design Overview", "Design Notes", "About this Design", "Style Guide", "Color Palette", or any other meta-commentary section explaining the design itself. The rendered page is the deliverable, not documentation about it.
@@ -614,6 +611,23 @@ BUT this is a choice between PATCH and FULL FILE for ONE file. It does NOT overr
 
 When editing or generating inline SVGs, reference the exact SVG markup from the CURRENT FILE — do not reconstruct path data from memory.
 
+# Animation effects on iteration
+
+The Cinder framework provides the animation CSS and runtime automatically — do NOT add inline \`.animate-in\` rules or IntersectionObserver scripts. Your only job is to add the right classes and data attributes to markup. Six effects are available:
+
+- **Fade-in** (\`animate-in\`) — default reveal for non-above-the-fold content elements (cards, paragraphs, standalone imagery). On by default.
+- **Scroll-reveal directions** — \`animate-in-up\`, \`animate-in-left\`, \`animate-in-right\`, \`animate-in-scale\`, \`animate-in-blur\` (mutually exclusive with \`animate-in\` on the same element). Plus \`animate-in-stagger\` on a PARENT to cascade child reveals.
+- **Parallax** — \`parallax-bg\` on a \`<section>\` with a background image, OR \`data-parallax="<speed>"\` on any element (0.6–0.85 typical). Multiple per page OK when they reinforce; can be text-only (e.g., side-by-side cards at different speeds for depth). Runtime auto-disables on touch/narrow viewports — the layout must still work as a static stack.
+- **Sticky eyebrow** (\`sticky-eyebrow\`) — small label INSIDE a long section; pins to top while content scrolls past. Only on sections tall enough for it to matter.
+- **Count-up** (\`data-countup="42"\`, optional \`data-countup-suffix="%"\`) — only on stat-shaped numbers (KPIs, social proof). Never prices, dates, phone numbers, or arbitrary numerals.
+- **Marquee** (\`marquee-strip\`) — continuous horizontal scroll; only for naturally strip-shaped content (logo bars, key benefit words). Max one per page. Content must be short.
+
+**Mutual exclusion per section**: a section uses fade-in OR one specialty effect, never both on the same element. Fade-in is the safe default for sections without a specialty effect.
+
+When the user asks to add an effect ("add parallax to the hero", "make the stats count up", "stagger the cards"), apply the corresponding classes/attributes. If the content can't reasonably support the requested effect (e.g., user asks for marquee on long sentences, or count-up on a non-numeric heading), say so in the prose rather than forcing it.
+
+The user can opt a single section out of all animations by setting \`data-anim-off\` on its \`<section>\` element (via the Select-mode inspector). Don't second-guess that attribute — leave it alone unless asked.
+
 # What NOT to include in the HTML
 
 - No "Design Overview", "Style Guide", "Color Palette" or other meta-commentary sections inside the page.
@@ -716,6 +730,7 @@ export const LAYOUT_ARCHETYPES = [
   'modular-blocks',
   'data-forward-stats',
   'asymmetric-overlap',
+  'product-spotlight',
 ];
 
 // Natural blend pairs — each entry is [archetype1, archetype2].
@@ -724,6 +739,8 @@ const ARCHETYPE_BLENDS = [
   ['fullwidth-media-bands', 'data-forward-stats'],
   ['modular-blocks', 'data-forward-stats'],
   ['asymmetric-overlap', 'editorial'],
+  ['product-spotlight', 'asymmetric-overlap'],
+  ['product-spotlight', 'data-forward-stats'],
 ];
 
 /**
@@ -768,6 +785,7 @@ const HERO_AFFINITY = {
   'modular-blocks':         ['mosaic-wall', 'type-statement'],
   'data-forward-stats':     ['stat-headline'],
   'asymmetric-overlap':     ['asymmetric-collage', 'split-anchor'],
+  'product-spotlight':      ['centered-spotlight', 'split-anchor', 'cinematic-frame'],
 };
 
 /**

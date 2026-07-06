@@ -60,6 +60,14 @@ export const IconTrash = () => wrap(
   </>
 );
 
+export const IconMotion = () => wrap(
+  <>
+    <path d="M2 8H4M6 8H8M10 8H12M14 8H14" />
+    <path d="M3 4L13 4" />
+    <path d="M5 12L11 12" />
+  </>
+);
+
 export const IconLink = () => wrap(
   <>
     <path d="M6.5 9.5 A2.5 2.5 0 0 1 6.5 6L8.5 4 A2.5 2.5 0 0 1 12 4 A2.5 2.5 0 0 1 12 7.5L11 8.5" />

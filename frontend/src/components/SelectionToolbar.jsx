@@ -2,8 +2,27 @@ import React from 'react';
 import { classifyElement } from '../inlineEdit/selectionUtils.js';
 import { computeElementSpecs } from '../inlineEdit/specs.js';
 import {
-  IconImage, IconPencil, IconSparkles, IconWand, IconTrash, IconLink,
+  IconImage, IconPencil, IconSparkles, IconWand, IconTrash, IconLink, IconMotion,
 } from '../inlineEdit/icons.jsx';
+
+// Walk up from `el` to the nearest enclosing <section> (or the element itself
+// if it is one). Returns null if the chain doesn't include a section.
+function enclosingSection(el) {
+  let cur = el;
+  while (cur && cur.tagName) {
+    if (cur.tagName === 'SECTION') return cur;
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
+// True if the section (or any descendant) carries any animation markup.
+function sectionHasAnim(section) {
+  if (!section) return false;
+  const selector = '.animate-in, .animate-in-up, .animate-in-left, .animate-in-right, .animate-in-scale, .animate-in-blur, .animate-in-stagger, .parallax-bg, [data-parallax], .sticky-eyebrow, [data-countup], .marquee-strip';
+  if (section.matches?.(selector)) return true;
+  return !!section.querySelector?.(selector);
+}
 
 // Condensed breadcrumb label — tag + optional #id only (no classes).
 function crumbLabel(el) {
@@ -57,6 +76,18 @@ export default function SelectionToolbar({
   // without going through chat. Picks from project pages or accepts a
   // manual URL (relative or absolute).
   if (klass.isLink) actions.push({ id: 'edit-link', Icon: IconLink, label: 'Edit Link' });
+  // Animations toggle: only meaningful when the selection lives inside a
+  // <section> that contains animation markup. Label flips based on the
+  // section's current data-anim-off state.
+  const animSection = enclosingSection(el);
+  if (animSection && sectionHasAnim(animSection)) {
+    const off = animSection.hasAttribute('data-anim-off');
+    actions.push({
+      id: 'anim-toggle',
+      Icon: IconMotion,
+      label: off ? 'Enable motion' : 'Disable motion',
+    });
+  }
   if (klass.isRemovable) actions.push({ id: 'remove', Icon: IconTrash, label: 'Remove' });
 
   return (

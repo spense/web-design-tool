@@ -9,6 +9,13 @@ import { commitInlineEdit } from '../inlineEdit/commit.js';
 import { extractTokens } from '../tokenRewriter.js';
 import { injectEmbeds, resolveEmbedsForPage } from '../embeds.js';
 import {
+  ANIMATIONS_CSS,
+  ANIMATIONS_JS,
+  buildEffectOverrideCss,
+  buildCountUpOffScript,
+} from '../../../backend/animationAssets.js';
+import { DEFAULT_ANIMATIONS } from '../animations.js';
+import {
   getSelectorPath,
   resolveSelectorPath,
   getElementChain,
@@ -25,7 +32,8 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, activeColor, activeFont, slug, project, onFaviconChange, onOgImageChange, scrollAnimations, onScrollAnimationsChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo, onInlinePrompt }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, activeColor, activeFont, slug, project, onFaviconChange, onOgImageChange, animations, onAnimationChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo, onInlinePrompt }) {
+  const effects = animations || DEFAULT_ANIMATIONS;
   const [viewport, setViewport] = useState('desktop');
   const [toolsOpen, setToolsOpen] = useState(false);
   const iframeRef = useRef(null);
@@ -34,8 +42,10 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   // we switch the active page (which reloads the iframe) and stash the target
   // section id here so the new page can scroll to it once it finishes loading.
   const pendingHashRef = useRef(null);
-  const scrollAnimationsRef = useRef(scrollAnimations);
-  scrollAnimationsRef.current = scrollAnimations;
+  // Fade-in toggle drives smooth-scroll behavior on in-page nav clicks (same
+  // intent as before: "if you opted out of motion, don't smooth-scroll either").
+  const smoothScrollRef = useRef(effects.fadeIn);
+  smoothScrollRef.current = effects.fadeIn;
   const [displayHtml, setDisplayHtml] = useState('');
 
   // ── Inline selection state ────────────────────────────────────────────────
@@ -217,7 +227,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 // fragment (if any) directly instead of stashing it for onLoad.
                 if (resolved.fragment) {
                   const el = doc.getElementById(resolved.fragment);
-                  if (el) el.scrollIntoView({ behavior: scrollAnimationsRef.current ? 'smooth' : 'instant', block: 'start' });
+                  if (el) el.scrollIntoView({ behavior: smoothScrollRef.current ? 'smooth' : 'instant', block: 'start' });
                 }
               } else {
                 if (resolved.fragment) pendingHashRef.current = resolved.fragment;
@@ -226,7 +236,7 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
             } else if (resolved.action === 'scroll') {
               ev.preventDefault();
               const el = doc.getElementById(resolved.target);
-              if (el) el.scrollIntoView({ behavior: scrollAnimationsRef.current ? 'smooth' : 'instant', block: 'start' });
+              if (el) el.scrollIntoView({ behavior: smoothScrollRef.current ? 'smooth' : 'instant', block: 'start' });
             } else if (resolved.action === 'block') {
               ev.preventDefault();
             }
@@ -522,7 +532,9 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     doc.documentElement.classList.toggle('__sel-mode', selectMode);
   }, [selectMode, displayHtml]);
 
-  // Sync animation toggle override into iframe
+  // Inject the canonical animations runtime (CSS + JS) into every iframe doc,
+  // plus per-effect override CSS for any toggle that's off. The runtime is
+  // idempotent; the override updates without reloading the iframe.
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe || !displayHtml) return;
@@ -530,43 +542,51 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
       try {
         const doc = iframe.contentDocument;
         if (!doc) return;
-        const id = '__anim-override';
-        let existing = doc.getElementById(id);
-        if (!scrollAnimations) {
-          if (!existing) {
-            existing = doc.createElement('style');
-            existing.id = id;
-            existing.textContent = '.animate-in { opacity: 1 !important; transform: none !important; transition: none !important; }';
-            doc.head.appendChild(existing);
+        // 1. Base CSS (idempotent — keyed by id)
+        if (!doc.getElementById('__cinder-anim-css')) {
+          const style = doc.createElement('style');
+          style.id = '__cinder-anim-css';
+          style.textContent = ANIMATIONS_CSS;
+          doc.head.appendChild(style);
+        }
+        // 2. Runtime JS (idempotent — script self-guards via window.__cinderAnim)
+        if (!doc.getElementById('__cinder-anim-js')) {
+          const script = doc.createElement('script');
+          script.id = '__cinder-anim-js';
+          script.textContent = ANIMATIONS_JS;
+          doc.body.appendChild(script);
+        } else if (iframe.contentWindow?.__cinderAnim) {
+          // Re-run setup so newly-injected CSS overrides are reflected.
+          iframe.contentWindow.__cinderAnim.refresh();
+        }
+        // 3. Per-effect override (replaced on every render so toggle flips apply live)
+        const overrideId = '__cinder-anim-override';
+        const overrideCss = buildEffectOverrideCss(effects);
+        let override = doc.getElementById(overrideId);
+        if (overrideCss) {
+          if (!override) {
+            override = doc.createElement('style');
+            override.id = overrideId;
+            doc.head.appendChild(override);
           }
-        } else {
-          if (existing) existing.remove();
-          // Reset elements that haven't animated yet so the observer fires fresh
-          doc.querySelectorAll('.animate-in:not(.visible)').forEach(el => {
-            el.classList.remove('visible');
-          });
-          // Re-observe all animate-in elements
-          if (iframe.contentWindow) {
-            const script = doc.createElement('script');
-            script.textContent = `
-              if (window.__animObserver) window.__animObserver.disconnect();
-              window.__animObserver = new IntersectionObserver((entries) => {
-                entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); window.__animObserver.unobserve(e.target); } });
-              }, { threshold: 0.15 });
-              document.querySelectorAll('.animate-in:not(.visible)').forEach(el => window.__animObserver.observe(el));
-            `;
-            doc.body.appendChild(script);
-            script.remove();
-          }
+          override.textContent = overrideCss;
+        } else if (override) {
+          override.remove();
+        }
+        // 4. Count-up off requires a runtime kick (CSS can't stop a JS tween).
+        const countUpOff = buildCountUpOffScript(effects);
+        if (countUpOff) {
+          const s = doc.createElement('script');
+          s.textContent = countUpOff;
+          doc.body.appendChild(s);
+          s.remove();
         }
       } catch {}
     };
-    // Apply immediately if iframe already loaded
     apply();
-    // Also apply on load (for page switches)
     iframe.addEventListener('load', apply);
     return () => iframe.removeEventListener('load', apply);
-  }, [scrollAnimations, displayHtml]);
+  }, [effects, displayHtml]);
 
   const openFullScreen = () => {
     if (!html) return;
@@ -616,8 +636,8 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 project={project}
                 onFaviconChange={onFaviconChange}
                 onOgImageChange={onOgImageChange}
-                scrollAnimations={scrollAnimations}
-                onScrollAnimationsChange={onScrollAnimationsChange}
+                animations={effects}
+                onAnimationChange={onAnimationChange}
               />
             )}
           </div>
@@ -722,6 +742,34 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 }
                 onApplyTokens({ ...pages, [activePage]: newHtml });
                 clearSelection();
+                return;
+              }
+              if (actionId === 'anim-toggle') {
+                // Walk up from the selected element to the enclosing <section>;
+                // toggle data-anim-off on it. commitInlineEdit walks the
+                // selectorPath in a parsed DOM, so we mirror the walk-up there
+                // to find the right section node to mutate.
+                const el = chain[chainIndex];
+                if (!el) return;
+                const sectionLive = el.closest?.('section');
+                if (!sectionLive) return;
+                const turnOn = sectionLive.hasAttribute('data-anim-off');
+                const newHtml = commitInlineEdit({
+                  sourceHtml: pages?.[activePage] || '',
+                  selectorPath,
+                  mutator: (target) => {
+                    let s = target;
+                    while (s && s.tagName !== 'SECTION') s = s.parentElement;
+                    if (!s) return;
+                    if (turnOn) s.removeAttribute('data-anim-off');
+                    else s.setAttribute('data-anim-off', '');
+                  },
+                });
+                if (!newHtml) {
+                  console.warn('[inline-edit] anim-toggle failed: could not resolve element');
+                  return;
+                }
+                onApplyTokens({ ...pages, [activePage]: newHtml });
                 return;
               }
               if (actionId === 'edit-link') {

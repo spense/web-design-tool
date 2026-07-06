@@ -7,6 +7,13 @@ import { extractAndDedupCss } from '../cssExtractor.js';
 import { buildMonogramSvg, isImportedPlaceholder } from '../faviconSvg.js';
 import { cleanupUnusedImages } from '../pixabay.js';
 import { serializeEmbedsForExport } from '../embeds.js';
+import {
+  ANIMATIONS_CSS,
+  ANIMATIONS_JS,
+  buildEffectOverrideCss,
+  buildCountUpOffScript,
+  normalizeAnimations,
+} from '../animationAssets.js';
 
 const router = Router();
 
@@ -126,24 +133,16 @@ async function runExport(slug, project, pages, session) {
       Object.entries(extractedCss).map(([n, c]) => [n, rewriteUploads(c)])
     );
 
-    // The CSS extractor moved `.animate-in` rules into an external stylesheet
-    // loaded via async <link>. By the time that CSS applies, the page has
-    // already painted with elements at default opacity, causing a flash and
-    // the IntersectionObserver may have already marked above-the-fold
-    // elements visible (no animation plays). Re-inject the critical animation
-    // styles inline in <head> so they apply immediately during HTML parse.
-    if (project.scrollAnimations === false) {
-      // User disabled animations — inject an override that wins over the
-      // extracted styles.
-      for (const [name, html] of Object.entries(htmlFiles)) {
-        htmlFiles[name] = injectAnimationOverride(html);
-      }
-    } else {
-      for (const [name, html] of Object.entries(htmlFiles)) {
-        if (/\banimate-in\b/.test(html)) {
-          htmlFiles[name] = injectCriticalAnimationCss(html);
-        }
-      }
+    // Inject the canonical animations runtime (CSS + JS) into every page so
+    // the exported site behaves identically to preview. Per-effect override
+    // CSS gates individual toggles without rewriting markup; a tiny inline
+    // script disables count-up at runtime when its toggle is off (CSS alone
+    // can't stop a JS tween).
+    const effects = normalizeAnimations(project);
+    const overrideCss = buildEffectOverrideCss(effects);
+    const countUpOff = buildCountUpOffScript(effects);
+    for (const [name, html] of Object.entries(htmlFiles)) {
+      htmlFiles[name] = injectAnimationsRuntime(html, overrideCss, countUpOff);
     }
 
     // Favicon: figure out which files we'll ship. Inject <link> tags into
@@ -285,21 +284,29 @@ function buildFaviconLinkBlock(favicon) {
   return lines.join('\n') + '\n';
 }
 
-const CRITICAL_ANIMATION_CSS = `  <style id="anim-critical">.animate-in{opacity:0;transform:translate3d(0,24px,0);transition:opacity 0.6s ease 0.25s,transform 0.6s ease 0.25s}.animate-in.visible{opacity:1;transform:none}</style>\n`;
-
-function injectCriticalAnimationCss(html) {
-  if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${CRITICAL_ANIMATION_CSS}</head>`);
+// Inject the canonical animations payload + any per-effect overrides into
+// an HTML page. Idempotent — looks for known ids before injecting again.
+function injectAnimationsRuntime(html, overrideCss, countUpOff) {
+  let out = html;
+  const baseStyle = `  <style id="cinder-anim-css">${ANIMATIONS_CSS}</style>\n`;
+  const baseScript = `  <script id="cinder-anim-js">${ANIMATIONS_JS}</script>\n`;
+  const overrideStyle = overrideCss
+    ? `  <style id="cinder-anim-override">${overrideCss}</style>\n`
+    : '';
+  const countUpScript = countUpOff
+    ? `  <script id="cinder-anim-countup-off">${countUpOff}</script>\n`
+    : '';
+  if (/<\/head>/i.test(out) && !/id=["']cinder-anim-css["']/.test(out)) {
+    out = out.replace(/<\/head>/i, `${baseStyle}${overrideStyle}</head>`);
+  } else if (overrideStyle && !/id=["']cinder-anim-override["']/.test(out)) {
+    out = out.replace(/<\/head>/i, `${overrideStyle}</head>`);
   }
-  return html;
-}
-
-function injectAnimationOverride(html) {
-  const style = `  <style id="anim-override">.animate-in { opacity: 1 !important; transform: none !important; transition: none !important; }</style>\n`;
-  if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${style}</head>`);
+  if (/<\/body>/i.test(out) && !/id=["']cinder-anim-js["']/.test(out)) {
+    out = out.replace(/<\/body>/i, `${baseScript}${countUpScript}</body>`);
+  } else if (countUpScript && !/id=["']cinder-anim-countup-off["']/.test(out)) {
+    out = out.replace(/<\/body>/i, `${countUpScript}</body>`);
   }
-  return html;
+  return out;
 }
 
 function injectFaviconLinks(html, linkBlock) {
