@@ -9,6 +9,7 @@ import EmbedPopover from './EmbedPopover.jsx';
 
 const MODELS = [
   { value: 'sonnet', label: 'Sonnet 4.6' },
+  { value: 'sonnet5', label: 'Sonnet 5' },
   { value: 'opus46', label: 'Opus 4.6' },
   { value: 'opus', label: 'Opus 4.7' },
   { value: 'haiku', label: 'Haiku 4.5' },

@@ -14,6 +14,7 @@ function getClient() {
 export const MODELS = {
   opus: 'claude-opus-4-7',
   opus46: 'claude-opus-4-6',
+  sonnet5: 'claude-sonnet-5',
   sonnet: 'claude-sonnet-4-6',
   haiku: 'claude-haiku-4-5',
 };

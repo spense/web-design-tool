@@ -9,6 +9,9 @@ const PRICING = {
   // Sonnet 4.6 — $3 / $15 per MTok, cached reads $0.30, cache writes $3.75
   sonnet:                { in: 3,    out: 15,  cacheRead: 0.30, cacheWrite: 3.75 },
   'claude-sonnet-4-6':   { in: 3,    out: 15,  cacheRead: 0.30, cacheWrite: 3.75 },
+  // Sonnet 5 — intro pricing $2 / $10 per MTok through 2026-08-31 (then $3 / $15)
+  sonnet5:               { in: 2,    out: 10,  cacheRead: 0.20, cacheWrite: 2.50 },
+  'claude-sonnet-5':     { in: 2,    out: 10,  cacheRead: 0.20, cacheWrite: 2.50 },
   // Opus 4.6 / 4.7 — $15 / $75 per MTok, cached reads $1.50, cache writes $18.75
   opus:                  { in: 15,   out: 75,  cacheRead: 1.50, cacheWrite: 18.75 },
   opus46:                { in: 15,   out: 75,  cacheRead: 1.50, cacheWrite: 18.75 },
