@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '../api.js';
 import ChatPanel from './ChatPanel.jsx';
+import CodePanel from './CodePanel.jsx';
 import PreviewPanel from './PreviewPanel.jsx';
 import ExportModal from './ExportModal.jsx';
 import { extractTokens } from '../tokenRewriter.js';
@@ -39,6 +40,12 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
   // ChatPanel renders a pill and includes it in the request; clears on send
   // or via the pill's ✕.
   const [inlineScope, setInlineScope] = useState(null);
+  // Code panel session: when non-null, the left slot renders CodePanel instead
+  // of ChatPanel. The session object describes what's being edited (title,
+  // tabs, onSave, onCancel). See CodePanel.jsx for the contract.
+  const [codePanelSession, setCodePanelSession] = useState(null);
+  const openCodePanel = useCallback((session) => setCodePanelSession(session), []);
+  const closeCodePanel = useCallback(() => setCodePanelSession(null), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -189,13 +196,10 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
       const { [action.name]: _t, ...restThreads } = prevThreads;
       session = { schemaVersion: 2, threads: restThreads };
       if (activeScope === action.name) nextScope = 'index.html';
-      // Strip page-scoped embeds targeting the removed page so they don't
-      // become orphans (invisible to the popover but still on project.embeds).
-      if (Array.isArray(project.embeds) && project.embeds.length > 0) {
-        const surviving = project.embeds.filter(e => !(e.scope === 'page' && e.page === action.name));
-        if (surviving.length !== project.embeds.length) {
-          project = { ...project, embeds: surviving };
-        }
+      // Drop per-page custom code for the removed page so it doesn't linger.
+      if (project.pageCode && project.pageCode[action.name]) {
+        const { [action.name]: _dropped, ...restCode } = project.pageCode;
+        project = { ...project, pageCode: restCode };
       }
     } else {
       return;
@@ -265,13 +269,16 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
     setData(d => d ? { ...d, project: { ...d.project, ogImage } } : d);
   }, [data]);
 
-  // Embeds live on project.embeds — single array, no per-page splatting in
-  // pages.json. The preview/export resolve which embeds apply to which page
-  // at render time. Skip history snapshots: adding a Calendly embed isn't a
-  // design change worth undo/redo'ing pages around.
-  const handleEmbedsChange = useCallback((nextEmbeds) => {
-    if (!data) return;
-    const nextProject = { ...data.project, embeds: nextEmbeds };
+  // Custom code fields live on project.json:
+  //   project.globalHead     — string, injected into <head> on every page
+  //   project.globalBodyEnd  — string, injected before </body> on every page
+  //   project.globalCss      — string, injected into <head> as the final <style>
+  //   project.pageCode       — { [pageName]: { head, bodyEnd } }
+  // Skip history snapshots: adding a tracking beacon isn't a design change
+  // worth undo/redo'ing pages around.
+  const handleProjectPatch = useCallback((patch) => {
+    if (!data || !patch) return;
+    const nextProject = { ...data.project, ...patch };
     persist({ ...data, project: nextProject }, { skipHistory: true });
   }, [data, persist]);
 
@@ -435,27 +442,47 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
   if (!data) return <div className="preview-empty">Project not found.</div>;
 
   return (
-    <div className={`project-view${chatCollapsed ? ' chat-collapsed' : ''}`}>
-      {!chatCollapsed && (
-        <ChatPanel
-          project={data.project}
-          pages={data.pages}
-          messages={(data.session?.threads?.[activeScope]) || []}
-          sessionTotal={Object.values(data.session?.threads || {}).reduce(
-            (sum, thread) => sum + totalCost(thread),
-            0,
+    <div className={`project-view${chatCollapsed && !codePanelSession ? ' chat-collapsed' : ''}`}>
+      {(!chatCollapsed || codePanelSession) && (
+        <div className={`project-panel-slot${codePanelSession ? ' is-code' : ''}`}>
+          {codePanelSession ? (
+            <CodePanel
+              key={codePanelSession.key || 'code'}
+              session={{
+                ...codePanelSession,
+                onCancel: () => {
+                  codePanelSession.onCancel?.();
+                  closeCodePanel();
+                },
+                onSave: async (values) => {
+                  await codePanelSession.onSave?.(values);
+                  closeCodePanel();
+                },
+              }}
+            />
+          ) : (
+            <ChatPanel
+              project={data.project}
+              pages={data.pages}
+              messages={(data.session?.threads?.[activeScope]) || []}
+              sessionTotal={Object.values(data.session?.threads || {}).reduce(
+                (sum, thread) => sum + totalCost(thread),
+                0,
+              )}
+              activePage={activePage}
+              activeScope={activeScope}
+              onScopeChange={handleScopeChange}
+              onPagesAction={handlePagesAction}
+              onUpdate={updatePages}
+              hasApiKey={hasApiKey}
+              onStreamingChange={onStreamingChange}
+              inlineScope={inlineScope}
+              onClearInlineScope={() => setInlineScope(null)}
+              onProjectPatch={handleProjectPatch}
+              onOpenCodePanel={openCodePanel}
+            />
           )}
-          activePage={activePage}
-          activeScope={activeScope}
-          onScopeChange={handleScopeChange}
-          onPagesAction={handlePagesAction}
-          onUpdate={updatePages}
-          hasApiKey={hasApiKey}
-          onStreamingChange={onStreamingChange}
-          inlineScope={inlineScope}
-          onClearInlineScope={() => setInlineScope(null)}
-          onEmbedsChange={handleEmbedsChange}
-        />
+        </div>
       )}
       <PreviewPanel
         slug={tab.slug}
@@ -485,6 +512,7 @@ export default function ProjectView({ tab, onUpdateTab, hasApiKey, onStreamingCh
           if (chatCollapsed) setChatCollapsed(false);
           setInlineScope(scope);
         }}
+        onOpenCodePanel={openCodePanel}
       />
       {exportResult && (
         <ExportModal

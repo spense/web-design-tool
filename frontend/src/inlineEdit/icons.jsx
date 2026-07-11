@@ -74,3 +74,28 @@ export const IconLink = () => wrap(
     <path d="M9.5 6.5 A2.5 2.5 0 0 1 9.5 10L7.5 12 A2.5 2.5 0 0 1 4 12 A2.5 2.5 0 0 1 4 8.5L5 7.5" />
   </>
 );
+
+export const IconCode = () => wrap(
+  <>
+    <path d="M6 4L2.5 8L6 12" />
+    <path d="M10 4L13.5 8L10 12" />
+  </>
+);
+
+export const IconInsertAbove = () => wrap(
+  <>
+    <path d="M8 2.5L8 8" />
+    <path d="M5.5 5L8 2.5L10.5 5" />
+    <path d="M3 10.5L13 10.5" />
+    <path d="M3 13L13 13" />
+  </>
+);
+
+export const IconInsertBelow = () => wrap(
+  <>
+    <path d="M3 3L13 3" />
+    <path d="M3 5.5L13 5.5" />
+    <path d="M8 8L8 13.5" />
+    <path d="M5.5 11L8 13.5L10.5 11" />
+  </>
+);

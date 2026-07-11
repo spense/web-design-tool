@@ -60,17 +60,20 @@ Frontend is a single SPA. Each "tab" is a project. Generated HTML is rendered in
 - `themePresets.js` — color / font / sizing / spacing / radius preset definitions.
 - `colorUtils.js` — hex/HSL math for theme generation.
 - `components/`
-  - `ProjectView.jsx` — wires together ChatPanel + PreviewPanel for one project. Owns `inlineScope` state (used to route the inline-edit Prompt action into the chat input).
-  - `ChatPanel.jsx` — chat input, model picker, streaming display, attachment handling, response parsing, persistence. **This is where most of the response handling lives.** Also renders the inline-edit scope pill, applies returned INLINE blocks, and shows chips on user messages that were scoped.
-  - `PreviewPanel.jsx` — iframe preview at mobile/tablet/desktop widths, page dropdown, Tools button, export, and the inline-edit Select toggle. Owns all selection state and overlays.
-  - `SelectionToolbar.jsx` — floating toolbar that anchors to the selected element. Breadcrumb climb, ambient CSS-spec readout, and the filtered action buttons (Replace / Edit text / Rewrite / Prompt / Remove).
+  - `ProjectView.jsx` — wires together ChatPanel + PreviewPanel for one project. Owns `inlineScope` state (used to route the inline-edit Prompt action into the chat input) and `codePanelSession` state (the panel-swap machinery: when non-null, the left slot renders `CodePanel` instead of `ChatPanel`).
+  - `ChatPanel.jsx` — chat input, model picker, streaming display, attachment handling, response parsing, persistence. **This is where most of the response handling lives.** Also renders the inline-edit scope pill, applies returned INLINE blocks, shows chips on user messages that were scoped, and hosts the `<>` (page/site HEAD+FOOTER) and `{}` (global CSS) icons in the scope bar.
+  - `CodePanel.jsx` — swappable code editor that replaces `ChatPanel` in the left slot. CodeMirror 6-based with `oneDark` syntax highlighting, line numbers, bracket matching. Cancel/Save header, per-tab language routing, inline validation error strip. Cmd/Ctrl+S saves. Panel width transitions from 480→720 via a `.project-panel-slot.is-code` class flip on the shared slot wrapper.
+  - `PreviewPanel.jsx` — iframe preview at mobile/tablet/desktop widths, page dropdown, Tools button, export, and the inline-edit Select toggle. Owns the hover-`+` insert overlay + runtime code-slot injection (page/global HEAD/FOOTER, global CSS).
+  - `SelectionToolbar.jsx` — floating toolbar that anchors to the selected element. Breadcrumb climb, ambient CSS-spec readout, and the filtered action buttons (Replace / Edit text / Rewrite / Prompt / Edit Code / Insert above / Insert below / Remove).
   - `SelectionPanel.jsx` — lower-right floating drawer that dispatches to one of the action sub-panels.
   - `inlinePanels/` — one component per drawer action: `EditTextPanel`, `RewriteTextPanel`, `ReplaceVisualPanel` (Pixabay + upload for image/bg; prompt + upload + paste for SVG).
   - `ToolsMenu.jsx` — applies theme presets by rewriting `:root` tokens across all pages without re-running the model.
   - `TabBar.jsx`, `NewTabView.jsx`, `ExportModal.jsx`, `Spinner.jsx` — UI primitives.
+- `codeValidate.js` — lenient validators for HTML/CSS/JS. Custom tokenizer + balance check for HTML (catches unclosed and mismatched tags including typo'd closes; auto-close-same rules for `<li>`/`<p>`/`<tr>`; recurses into embedded `<style>`/`<script>` blocks). `CSSStyleSheet.replaceSync` + `CSS.supports()` per declaration for CSS (catches structural syntax errors AND typo'd property names). `new Function` for JS. Custom elements, `data-*`, and vendor prefixes are accepted.
 - `inlineEdit/`
-  - `selectionUtils.js` — selector-path resolve (nth-child indices from `<body>`), element classifier, identity fingerprint (used to detect when an external edit invalidates the saved selection).
-  - `commit.js` — shared "parse source HTML → resolve path → run mutator → re-serialize" pipeline used by all standalone inline actions (Remove, Edit text, Rewrite, Replace visual).
+  - `selectionUtils.js` — selector-path resolve (nth-child indices from `<body>`), element classifier, identity fingerprint. Plus **`getFlowRoot`** / **`getStructuralChildren`** / **`isStructuralTopLevel`** for the section-insert affordances (future-proofs against `<main>` wrapper containers; filters hidden mobile-menu inputs).
+  - `useInlineSelection.js` — hook that owns all selection state (mode, path, fingerprint, chain, rect), the iframe overlay install + listeners (mousemove/click/scroll), the deselect handlers (Esc, click-outside, mode-off), and the cursor-mode class. Extracted from `PreviewPanel` for readability — behavior is identical.
+  - `commit.js` — shared "parse source HTML → resolve path → run mutator → re-serialize" pipeline used by every commit path (Remove, Edit text, Rewrite, Replace visual, Edit Code, and section insert).
   - `svgSanitize.js` — parses SVG markup, validates single `<svg>` root, strips `<script>`, `<foreignObject>`, on-handlers, `javascript:` URLs.
   - `htmlSanitize.js` — same idea for arbitrary HTML fragments returned by the prompt-change action (single root, tag-match, strip scripts/iframes/on-handlers).
   - `icons.jsx` — single-color SVG icons for the toolbar.
@@ -88,6 +91,16 @@ project.json         metadata: name, slug, created, modified, crawledUrl,
                      (tokenSnapshot also stores __googleFonts — the original
                      Google Fonts query string, used to restore fonts on
                      "Original" selection in the Tools menu)
+
+                     Custom code fields (all optional strings — omit or ""
+                     when unset):
+                       globalHead       injected into <head> on every page
+                       globalBodyEnd    injected before </body> on every page
+                       globalCss        wrapped in <style> and appended last
+                                        in <head> so it wins the cascade
+                       pageCode         { [pageName]: { head, bodyEnd } } —
+                                        per-page HEAD / FOOTER additions
+
 pages.json           { "index.html": "<!DOCTYPE...>", "contact.html": "...", ... }
 session.json         { messages: [{role, content, timestamp}, ...] }
 history/             snapshot per save: {ISO-timestamp}.json holds pages + last message
@@ -274,6 +287,8 @@ A click-to-edit overlay on the design preview. Lets the user point at any elemen
   - **Edit text** (text-leaf elements only) — manual textarea, replaces `textContent`.
   - **Rewrite** (text-leaf elements only) — AI-powered, Haiku 4.5, plain text only.
   - **Prompt** — universal, hidden for SVG (Replace SVG already has a prompt). Routes through the main chat panel.
+  - **Edit Code** — universal. Opens `CodePanel` with the element's `outerHTML` prefilled; save replaces the element (through `commitInlineEdit`) with the new markup (supports multi-root paste; empty save deletes the element). Full validation on save.
+  - **Insert above / Insert below** — appears only when the selection is a direct child of the flow root (see the section-insert section below). Opens `CodePanel` with a `<section>…</section>` placeholder; save inserts as a new sibling. The workaround for the fixed-header case where hovering above the header isn't possible.
   - **Remove** — universal. Native `confirm()` before commit.
 
 A "text-leaf" element is one whose own textContent is non-empty AND whose children (if any) are all inline-formatting tags (`<span>`, `<strong>`, `<em>`, `<a>`, etc.). This catches `<div>One-line label</div>` while excluding block containers like `<section>` or `<div class="card">…blocks…</div>`.
@@ -323,10 +338,132 @@ Flow:
 
 ### Known limitations (v1)
 
-- **CSS rule edits are not possible inline.** The model only sees the element's outerHTML, not the page stylesheet. For visual changes it falls back to inline `style="…"` overrides — functional but accumulates style-attr cruft over many edits. For cross-cutting CSS changes, use the main chat.
-- **`background-image` from `::before`/`::after` pseudo-elements** can't be replaced — inline style on the element doesn't reach pseudo-element CSS.
+- **AI-driven CSS rule edits are not possible inline.** The model only sees the element's outerHTML, not the page stylesheet. For AI-generated visual changes it falls back to inline `style="…"` overrides. For direct rule edits, use **Edit Code** on the containing `<section>` (edits inline `<style>` blocks alongside the markup) or the **Global CSS `{}`** icon (applies to every page and wins the cascade).
+- **`background-image` from `::before`/`::after` pseudo-elements** can't be replaced via the Replace visual action — inline style on the element doesn't reach pseudo-element CSS. Global CSS or Edit Code on the parent section can override them.
 - **Background-image replacement** writes `style="background-image: url(...) !important"` to win the cascade even against class rules using `!important`. The override is unquoted (`url(uploads/foo.jpg)`) so HTML serialization doesn't entity-encode the quotes and break the downstream `rewriteUploadsUrls` pass.
 - **Pixabay-downloaded images** for inline replacements persist in `uploads/` until the next chat turn runs `cleanupUnusedImages` — consistent with chat-driven image swaps. Once cleaned, the previous image's history snapshot still references a missing file.
+
+---
+
+## Custom code
+
+Beyond chat-driven edits, the tool has a code-editor path for direct authoring: per-element `outerHTML` edits, section inserts (with an HTML/CSS/JS placeholder scope), per-page HEAD/FOOTER injections, All-Pages HEAD/FOOTER, and a Global CSS field. All of it goes through a shared `CodePanel` component built on CodeMirror 6.
+
+### Panel swap
+
+The left slot in `ProjectView` (`.project-panel-slot`) hosts either `ChatPanel` or `CodePanel` depending on `codePanelSession` state. The wrapping slot owns the width — 480px for chat, 720px for code (a `.is-code` class flip with a 220ms `max-width` transition). Any component in the tree can request the panel via the `onOpenCodePanel(session)` prop:
+
+```js
+onOpenCodePanel({
+  key: 'unique-key',                    // React key; different keys remount CodePanel
+  title: 'Edit <section>',
+  tabs: [
+    { id: 'html', label: 'HTML', lang: 'html', value: '', placeholder: '…' },
+    { id: 'css',  label: 'CSS',  lang: 'css',  value: '' },
+    // any of html / css / js
+  ],
+  initialTabId: 'html',                 // optional; defaults to first tab
+  onSave: (valuesById) => { /* patch storage */ },
+  onCancel: () => {},
+});
+```
+
+`CodePanel` validates every tab via `codeValidate.js` before firing `onSave`. First failure focuses that tab and surfaces the error in a red strip below the editor. Cmd/Ctrl+S saves; Esc cancels.
+
+### Validation
+
+`codeValidate.js` exposes `validateHtml`, `validateCss`, `validateJs`, and `validateByLang(lang, input)`. Design goals: catch typos and syntax errors, don't enforce standards-mode rules; custom elements, `data-*` attrs, and vendor prefixes always pass.
+
+- **HTML** — custom tokenizer that walks the source char-by-char and tracks tag balance. Catches unclosed and mismatched close tags (which `htmlparser2` and `DOMParser` silently auto-correct). Handles comments, doctype, CDATA, quoted attrs (`title="a>b"`), raw-text elements (`<script>`/`<style>`), void tags, and HTML5 auto-close-same rules for `<li>`/`<p>`/`<tr>`/etc. After the balance check, recurses into embedded `<style>` and `<script>` blocks and routes their contents through `validateCss`/`validateJs`.
+- **CSS** — `CSSStyleSheet.replaceSync` for structural syntax errors, then `CSS.supports(prop, 'initial')` per declaration for typo'd property names (which browsers silently drop for forward-compat, hiding the typo from the structural parser). Skips vendor prefixes and `--custom-props`.
+- **JS** — `new Function(src)` catches syntax errors with line/column info. Runtime errors are out of scope.
+
+### Global code fields (`<>` and `{}` icons)
+
+The chat panel's scope bar surfaces two icons:
+
+- **`<>` — page/site HEAD & FOOTER.** Opens `CodePanel` with two tabs (HEAD, FOOTER). Scope-aware: when the active chat scope is `__site` ("All Pages"), edits target `project.globalHead` / `project.globalBodyEnd`. When the scope is a page, they target `project.pageCode[page].head` / `.bodyEnd`. Per-page and All-Pages code stack in the preview — both apply to a page when both are set.
+- **`{}` — global CSS.** Opens `CodePanel` with a single CSS tab targeting `project.globalCss`. Ignores the active scope.
+
+Persistence uses `handleProjectPatch` in `ProjectView` with `skipHistory: true` — adding a tracking beacon or CSS override isn't a design change worth undo/redo'ing pages around.
+
+### Runtime injection order
+
+`PreviewPanel` injects the code fields into the live iframe via runtime `data-slot` markers — no iframe reload on edit. `applyCodeSlots` removes any existing slot elements first, then re-inserts in list order. `<script>` tags are re-created via `createElement` (not left as inert template output) so they execute.
+
+Order:
+
+- **Head** (top to bottom of `<head>`):
+  1. `global-head` — All-Pages HEAD
+  2. `page-head` — per-page HEAD
+  3. `global-css` — wrapped in `<style>`, always last so it wins the CSS cascade
+
+- **Body end** (before `</body>`):
+  1. `global-body-end` — All-Pages FOOTER
+  2. `page-body-end` — per-page FOOTER
+
+Rationale: global scripts (analytics, chat widgets) load first so per-page scripts can rely on them. `globalCss` last so any inline `<style>` the page carries is overridden by the user's Global CSS.
+
+### Section insert
+
+Two entry points, one commit path (`openInsertPanel` in `PreviewPanel`):
+
+- **Hover-`+` overlay** — Only visible in Select Mode. Tracks mouse position inside the iframe; when within 24px of any gap between structural top-level items (or above the first, or below the last), renders a hairline + circular `+` overlay in the parent viewport. Click opens `CodePanel` with a `<section>…</section>` placeholder.
+- **Insert above / Insert below toolbar actions** — Appear on the SelectionToolbar when the selection is a direct child of the flow root (`isStructuralTopLevel`). Same `CodePanel` path with the same placeholder. Covers the fixed-header edge case where hovering above the header isn't possible.
+
+Both routes pass a **DOM index** (not a structural index) to the mutator so the position is correct even when the flow root has non-structural children (hidden `<input type="checkbox">` mobile menu toggles, decorative helpers). The mutator uses `<template>.innerHTML` to parse the pasted markup and then `insertBefore` / `appendChild` to place it inside the flow root — supports multi-root paste and section-scoped `<style>` / `<script>` blocks.
+
+**Scoped styles/scripts.** The insert editor is deliberately open. Whatever you paste is inserted verbatim, so you can put a `<style>` or `<script>` block inside the section markup — they'll live and die with the section. IIFE-wrap `<script>` contents to keep variables from leaking to other sections.
+
+### Flow root
+
+The flow root is the element whose direct children are the page's top-level structural items (`<header>`, `<section>`, `<footer>`, etc.). It's what `getStructuralChildren`, `isStructuralTopLevel`, and the section-insert commit path all operate on.
+
+Detection (`getFlowRoot`):
+1. If `<body>` has exactly one direct structural `<main>` child, the flow root is that `<main>`.
+2. Otherwise the flow root is `<body>`.
+
+`isStructuralChild` filters out non-rendered tags (`<script>`, `<style>`, `<template>`, `<link>`, etc.), elements with the `hidden` attribute, `<input type="hidden">`, and elements with `display:none` / `visibility:hidden` / `opacity:0` / zero-size rect. Fixed-position `<header>` still counts — position doesn't disqualify.
+
+Future-proofs against designs that adopt `<main>` wrappers or add hidden helpers (mobile-menu checkboxes are already common), without hardcoding either shape.
+
+---
+
+## Design engine handoff
+
+The sibling **Web Design Engine** (`/Users/spenserlea/Sites/web-design-engine`) consumes exports from this tool and produces Astro builds. When a project has any custom code set, the export path writes a sidecar `siteCode.json` next to the HTML/CSS/assets, and the engine reads it directly rather than trying to regex-scrape code out of page bodies.
+
+### Sidecar: `siteCode.json`
+
+Owned jointly by this tool and the design engine. Schema (all fields optional; the file is only written when at least one field is set):
+
+```json
+{
+  "globalCss": "…",
+  "globalHead": "<link ...>\n<meta ...>",
+  "globalBodyEnd": "<script ...></script>",
+  "pages": {
+    "index":    { "head": "…", "bodyEnd": "…" },
+    "about-us": { "head": "…" }
+  }
+}
+```
+
+**Page slugs strip the `.html` suffix** so they map cleanly to Astro routes (`index.html` → `index`, `about-us.html` → `about-us`).
+
+Built by `buildSiteCodeManifest` in `backend/routes/export.js`. Empty strings and empty per-page objects are dropped.
+
+### What the engine needs to do
+
+- **Global HEAD / FOOTER** — inject into the shared Astro layout so every page carries them.
+- **Global CSS** — inject as the final `<style>` in `<head>` (matches the preview's cascade order — it must win over any page-level styles).
+- **Per-page HEAD / FOOTER** — inject into the matching route's page component. When both global and per-page code are set, **global loads first** (scripts benefit from that order; per-page code can depend on globals being ready).
+
+### Rewriter contract
+
+The chat-driven code rewriter must **not** touch the sidecar fields during AI regenerations. They're user-authored and not model-visible. The model can generate a section that contains a scoped `<style>` or `<script>` — that's fine; it lives inside `pages.json` and flows through the normal export path.
+
+Section-scoped `<style>` and `<script>` blocks inside `pages.json` need no special engine handling: Astro renders them as-is inside the section. If the engine strips or hoists inline scripts as part of its build, it must preserve those inside sections.
 
 ---
 

@@ -5,7 +5,6 @@ import { parsePatchBlocks, applyPatches, parseRegionBlocks, applyRegions, editSt
 import { calculateCost, totalCost, formatCost } from '../pricing.js';
 import Spinner from './Spinner.jsx';
 import AddPageDialog from './AddPageDialog.jsx';
-import EmbedPopover from './EmbedPopover.jsx';
 
 const MODELS = [
   { value: 'sonnet', label: 'Sonnet 4.6' },
@@ -26,7 +25,7 @@ function formatDuration(secs) {
 // Mirror of backend SITE_THREAD constant.
 const SITE_THREAD = '__site';
 
-export default function ChatPanel({ project, pages, messages, sessionTotal, activePage, activeScope, onScopeChange, onPagesAction, onUpdate, hasApiKey, onStreamingChange, inlineScope, onClearInlineScope, onEmbedsChange }) {
+export default function ChatPanel({ project, pages, messages, sessionTotal, activePage, activeScope, onScopeChange, onPagesAction, onUpdate, hasApiKey, onStreamingChange, inlineScope, onClearInlineScope, onProjectPatch, onOpenCodePanel }) {
   const [input, setInput] = useState('');
   const [model, setModel] = useState(project.lastModel || 'sonnet');
   const [streaming, setStreaming] = useState(false);
@@ -666,8 +665,9 @@ export default function ChatPanel({ project, pages, messages, sessionTotal, acti
         disabled={streaming}
         currentPages={pages}
         onPagesAction={onPagesAction}
-        embeds={project?.embeds || []}
-        onEmbedsChange={onEmbedsChange}
+        project={project}
+        onProjectPatch={onProjectPatch}
+        onOpenCodePanel={onOpenCodePanel}
       />
       <div className="chat-messages" ref={messagesRef} onScroll={handleMessagesScroll}>
         {messages.length === 0 && !streaming && !crawling && !imagePoolStatus && (
@@ -830,7 +830,7 @@ export default function ChatPanel({ project, pages, messages, sessionTotal, acti
 //   - 2+ pages: dropdown lists "All Pages" (SITE_THREAD) + every page file.
 //
 // The page-actions ellipsis (Add / Duplicate / Delete) hides until pages exist.
-function ScopeBar({ pages, activeScope, onScopeChange, disabled, currentPages, onPagesAction, embeds, onEmbedsChange }) {
+function ScopeBar({ pages, activeScope, onScopeChange, disabled, currentPages, onPagesAction, project, onProjectPatch, onOpenCodePanel }) {
   const [open, setOpen] = useState(false);
   // Page dialog: same component handles both Add and Duplicate, differentiated
   // by `dialogKind`. Duplicate uses the active scope as the source page (or
@@ -838,7 +838,6 @@ function ScopeBar({ pages, activeScope, onScopeChange, disabled, currentPages, o
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogKind, setDialogKind] = useState('add');
   const [dialogSource, setDialogSource] = useState(null);
-  const [embedOpen, setEmbedOpen] = useState(false);
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -927,27 +926,35 @@ function ScopeBar({ pages, activeScope, onScopeChange, disabled, currentPages, o
         </div>
       </div>
       <div className="scope-bar-right">
-        {hasPages && onEmbedsChange && (
-          <div className="embed-wrap">
+        {hasPages && onOpenCodePanel && onProjectPatch && (
+          <>
             <button
               type="button"
-              className={`scope-actions-btn embed-btn${embedOpen ? ' active' : ''}`}
-              onClick={() => setEmbedOpen(o => !o)}
+              className="scope-actions-btn"
+              onClick={() => openCodePanelForHeadFoot({
+                activeScope, project, onProjectPatch, onOpenCodePanel,
+              })}
               disabled={disabled}
-              title="Manage embed code"
-              aria-label="Manage embed code"
+              title={activeScope === SITE_THREAD
+                ? 'Edit HEAD and FOOTER code for all pages'
+                : `Edit HEAD and FOOTER code for ${activeScope}`}
+              aria-label="Edit page code"
             >
-              <EmbedIcon />
+              <CodeBracketsIcon />
             </button>
-            {embedOpen && (
-              <EmbedPopover
-                embeds={embeds}
-                activeScope={activeScope}
-                onChange={onEmbedsChange}
-                onClose={() => setEmbedOpen(false)}
-              />
-            )}
-          </div>
+            <button
+              type="button"
+              className="scope-actions-btn"
+              onClick={() => openCodePanelForGlobalCss({
+                project, onProjectPatch, onOpenCodePanel,
+              })}
+              disabled={disabled}
+              title="Edit global CSS"
+              aria-label="Edit global CSS"
+            >
+              <CurlyBracesIcon />
+            </button>
+          </>
         )}
         {hasPages && (
           <ScopeActionsMenu
@@ -1020,13 +1027,90 @@ function ScopeActionsMenu({ disabled, onAdd, onDuplicate, onDelete }) {
   );
 }
 
-function EmbedIcon() {
+function CodeBracketsIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="16 18 22 12 16 6" />
       <polyline points="8 6 2 12 8 18" />
     </svg>
   );
+}
+function CurlyBracesIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" />
+      <path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" />
+    </svg>
+  );
+}
+
+// Session-builder helpers for the scope bar's <> and {} icons. They live
+// outside the ScopeBar function to keep the render body compact and to make
+// the wire-up (project → tabs → onSave patch) explicit and testable.
+function openCodePanelForHeadFoot({ activeScope, project, onProjectPatch, onOpenCodePanel }) {
+  const isAllPages = activeScope === SITE_THREAD;
+  const scopeLabel = isAllPages ? 'All Pages' : activeScope;
+  const currentHead = isAllPages
+    ? (project?.globalHead || '')
+    : (project?.pageCode?.[activeScope]?.head || '');
+  const currentBody = isAllPages
+    ? (project?.globalBodyEnd || '')
+    : (project?.pageCode?.[activeScope]?.bodyEnd || '');
+
+  onOpenCodePanel({
+    key: `code-${isAllPages ? '__site' : activeScope}`,
+    title: `Code · ${scopeLabel}`,
+    tabs: [
+      {
+        id: 'head',
+        label: 'HEAD',
+        lang: 'html',
+        value: currentHead,
+        placeholder: '<!-- Injected before </head>. Analytics tags, meta, link, style, script — all valid. -->',
+      },
+      {
+        id: 'bodyEnd',
+        label: 'FOOTER',
+        lang: 'html',
+        value: currentBody,
+        placeholder: '<!-- Injected before </body>. Chat widgets, tracking pixels, deferred scripts. -->',
+      },
+    ],
+    initialTabId: 'head',
+    onSave: (values) => {
+      const head = values.head || '';
+      const bodyEnd = values.bodyEnd || '';
+      if (isAllPages) {
+        onProjectPatch({ globalHead: head, globalBodyEnd: bodyEnd });
+      } else {
+        const nextCode = { ...(project?.pageCode || {}) };
+        if (!head && !bodyEnd) {
+          delete nextCode[activeScope];
+        } else {
+          nextCode[activeScope] = { head, bodyEnd };
+        }
+        onProjectPatch({ pageCode: nextCode });
+      }
+    },
+    onCancel: () => {},
+  });
+}
+function openCodePanelForGlobalCss({ project, onProjectPatch, onOpenCodePanel }) {
+  onOpenCodePanel({
+    key: 'code-global-css',
+    title: 'Global CSS',
+    tabs: [
+      {
+        id: 'css',
+        label: 'CSS',
+        lang: 'css',
+        value: project?.globalCss || '',
+        placeholder: '/* Applied to every page. Loaded after page styles so it wins the cascade. */',
+      },
+    ],
+    onSave: (values) => onProjectPatch({ globalCss: values.css || '' }),
+    onCancel: () => {},
+  });
 }
 function PlusIcon() {
   return (

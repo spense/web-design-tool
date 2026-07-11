@@ -1,8 +1,9 @@
 import React from 'react';
-import { classifyElement } from '../inlineEdit/selectionUtils.js';
+import { classifyElement, isStructuralTopLevel } from '../inlineEdit/selectionUtils.js';
 import { computeElementSpecs } from '../inlineEdit/specs.js';
 import {
-  IconImage, IconPencil, IconSparkles, IconWand, IconTrash, IconLink, IconMotion,
+  IconImage, IconPencil, IconSparkles, IconWand, IconTrash, IconLink, IconMotion, IconCode,
+  IconInsertAbove, IconInsertBelow,
 } from '../inlineEdit/icons.jsx';
 
 // Walk up from `el` to the nearest enclosing <section> (or the element itself
@@ -72,6 +73,16 @@ export default function SelectionToolbar({
   }
   // Prompt is redundant for SVG (Replace SVG already has a prompt field).
   if (!klass.isSvg) actions.push({ id: 'prompt-change', Icon: IconWand, label: 'Prompt' });
+  // Edit Code — raw outerHTML editor. Available for every selectable element
+  // (SVG root included; the editor is happy with any well-formed markup).
+  actions.push({ id: 'edit-code', Icon: IconCode, label: 'Edit Code' });
+  // Insert Above / Insert Below — only for top-level structural items
+  // (direct children of the flow root). Solves the fixed-header case where
+  // hovering between the header and the hero isn't possible.
+  if (el && el.ownerDocument && isStructuralTopLevel(el, el.ownerDocument)) {
+    actions.push({ id: 'insert-above', Icon: IconInsertAbove, label: 'Insert above' });
+    actions.push({ id: 'insert-below', Icon: IconInsertBelow, label: 'Insert below' });
+  }
   // Edit Link only for <a> elements with an href — retargets the link
   // without going through chat. Picks from project pages or accepts a
   // manual URL (relative or absolute).

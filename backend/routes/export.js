@@ -6,7 +6,6 @@ import { getProject, projectDir } from '../storage.js';
 import { extractAndDedupCss } from '../cssExtractor.js';
 import { buildMonogramSvg, isImportedPlaceholder } from '../faviconSvg.js';
 import { cleanupUnusedImages } from '../pixabay.js';
-import { serializeEmbedsForExport } from '../embeds.js';
 import {
   ANIMATIONS_CSS,
   ANIMATIONS_JS,
@@ -208,15 +207,16 @@ async function runExport(slug, project, pages, session) {
       await fs.copyFile(ogImageFile.src, path.join(exportAssetsDir, ogImageFile.exportName));
     }
 
-    // Sidecar embed manifest. The design-engine reads this directly to
-    // componentize embeds into Astro layouts/pages — embed code never
-    // appears in the exported HTML. Skip the write when the project has
-    // no embeds so empty exports stay clean.
-    const exportEmbeds = serializeEmbedsForExport(project.embeds);
-    if (exportEmbeds.length > 0) {
+    // Sidecar `siteCode.json` — user-authored code snippets injected into
+    // the preview. The design engine reads this to inject global/per-page
+    // HEAD, FOOTER, and CSS into Astro layouts/pages. Snippets never appear
+    // baked into the exported HTML: the design engine owns placement. Skip
+    // the write when nothing is set so empty exports stay clean.
+    const siteCode = buildSiteCodeManifest(project);
+    if (siteCode) {
       await fs.writeFile(
-        path.join(exportDir, 'embeds.json'),
-        JSON.stringify({ embeds: exportEmbeds }, null, 2),
+        path.join(exportDir, 'siteCode.json'),
+        JSON.stringify(siteCode, null, 2),
         'utf8',
       );
     }
@@ -341,6 +341,50 @@ function injectOgImageTag(html, ogTag) {
     return stripped.replace(/<\/head>/i, `${ogTag}</head>`);
   }
   return stripped;
+}
+
+// Build the export-time manifest of user-authored code snippets. Returns
+// null when nothing is set (caller skips writing the sidecar).
+//
+// Schema (owned jointly with the design engine):
+//   {
+//     globalCss?: string,
+//     globalHead?: string,
+//     globalBodyEnd?: string,
+//     pages?: { [pageSlug]: { head?: string, bodyEnd?: string } }
+//   }
+// pageSlug strips the .html suffix so the engine can map directly to Astro
+// routes.
+function buildSiteCodeManifest(project) {
+  const globalCss = String(project?.globalCss || '').trim();
+  const globalHead = String(project?.globalHead || '').trim();
+  const globalBodyEnd = String(project?.globalBodyEnd || '').trim();
+  const pageCode = project?.pageCode && typeof project.pageCode === 'object' ? project.pageCode : null;
+
+  const pages = {};
+  if (pageCode) {
+    for (const [name, entry] of Object.entries(pageCode)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const head = String(entry.head || '').trim();
+      const bodyEnd = String(entry.bodyEnd || '').trim();
+      if (!head && !bodyEnd) continue;
+      const slug = String(name).replace(/\.html?$/i, '');
+      pages[slug] = {};
+      if (head) pages[slug].head = head;
+      if (bodyEnd) pages[slug].bodyEnd = bodyEnd;
+    }
+  }
+
+  const hasGlobal = globalCss || globalHead || globalBodyEnd;
+  const hasPages = Object.keys(pages).length > 0;
+  if (!hasGlobal && !hasPages) return null;
+
+  const out = {};
+  if (globalCss) out.globalCss = globalCss;
+  if (globalHead) out.globalHead = globalHead;
+  if (globalBodyEnd) out.globalBodyEnd = globalBodyEnd;
+  if (hasPages) out.pages = pages;
+  return out;
 }
 
 export default router;

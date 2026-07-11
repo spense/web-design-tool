@@ -7,7 +7,6 @@ import EditLinkDialog from './EditLinkDialog.jsx';
 import { IconPointer } from '../inlineEdit/icons.jsx';
 import { commitInlineEdit } from '../inlineEdit/commit.js';
 import { extractTokens } from '../tokenRewriter.js';
-import { injectEmbeds, resolveEmbedsForPage } from '../embeds.js';
 import {
   ANIMATIONS_CSS,
   ANIMATIONS_JS,
@@ -16,15 +15,10 @@ import {
 } from '../../../backend/animationAssets.js';
 import { DEFAULT_ANIMATIONS } from '../animations.js';
 import {
-  getSelectorPath,
-  resolveSelectorPath,
-  getElementChain,
-  isSelectable,
-  isVisuallyHidden,
-  topSelectableAt,
-  fingerprintElement,
-  matchesFingerprint,
+  getSelectorPath, fingerprintElement,
+  getFlowRoot, getStructuralChildren, isStructuralTopLevel,
 } from '../inlineEdit/selectionUtils.js';
+import { useInlineSelection } from '../inlineEdit/useInlineSelection.js';
 
 const VIEWPORTS = {
   desktop: { label: 'Desktop', width: '100%' },
@@ -32,7 +26,7 @@ const VIEWPORTS = {
   mobile: { label: 'Mobile', width: 390 },
 };
 
-export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, activeColor, activeFont, slug, project, onFaviconChange, onOgImageChange, animations, onAnimationChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo, onInlinePrompt }) {
+export default function PreviewPanel({ pages, activePage, onActivePage, onExport, exporting, snapshot, onSnapshot, onApplyTokens, activeColor, activeFont, slug, project, onFaviconChange, onOgImageChange, animations, onAnimationChange, chatCollapsed, onToggleChatCollapsed, canUndo, canRedo, onUndo, onRedo, onInlinePrompt, onOpenCodePanel }) {
   const effects = animations || DEFAULT_ANIMATIONS;
   const [viewport, setViewport] = useState('desktop');
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -49,46 +43,45 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
   const [displayHtml, setDisplayHtml] = useState('');
 
   // ── Inline selection state ────────────────────────────────────────────────
-  // Selection mode toggle. When OFF, the iframe behaves normally (anchor
-  // clicks navigate). When ON, clicks select elements for inline editing.
-  const [selectMode, setSelectMode] = useState(false);
-  // Path of nth-child indices from <body> down to the chosen element.
-  // Persists across iframe re-renders so the selection re-resolves on re-mount.
-  const [selectorPath, setSelectorPath] = useState(null);
-  // Identity snapshot of the selected element. After an iframe re-render,
-  // we re-resolve the path AND verify it points to the same element — paths
-  // alone are not enough (sibling shifts can land on a different element).
-  const [selectionFingerprint, setSelectionFingerprint] = useState(null);
-  // Index into the ancestor chain. 0 = outermost ancestor, last = clicked el.
-  const [chainIndex, setChainIndex] = useState(0);
-  // Live ancestor chain for the currently-selected element (refs into the iframe DOM).
-  const [chain, setChain] = useState([]);
-  // Selected element's rect, translated into the PARENT viewport.
-  const [selectionRect, setSelectionRect] = useState(null);
-  // Which inline action is currently open in the panel.
-  const [activeAction, setActiveAction] = useState(null);
+  // All selection lifecycle (state, iframe listeners, deselect handlers) lives
+  // in useInlineSelection. The hook keeps PreviewPanel focused on rendering
+  // and iframe orchestration.
+  const {
+    selectMode, setSelectMode,
+    selectorPath, setSelectorPath,
+    setSelectionFingerprint,
+    chain,
+    chainIndex, setChainIndex,
+    selectionRect,
+    activeAction, setActiveAction,
+    clearSelection,
+  } = useInlineSelection({ iframeRef, displayHtml });
+
   // Edit Link dialog: opened from the SelectionToolbar's link action. Holds
   // the link's current href so the dialog can pre-fill the Custom field
   // with the existing value when the user wants to tweak it.
   const [linkEditOpen, setLinkEditOpen] = useState(false);
   const [linkEditHref, setLinkEditHref] = useState('');
 
-  const selectModeRef = useRef(selectMode);
-  selectModeRef.current = selectMode;
-  // Read chain/chainIndex through refs inside long-lived listeners (the
-  // iframe's `scroll` handler is installed once per iframe-load and would
-  // otherwise capture stale values from before the user selected anything).
-  const chainRef = useRef(chain);
-  chainRef.current = chain;
-  const chainIndexRef = useRef(chainIndex);
-  chainIndexRef.current = chainIndex;
+  // Hover-`+` overlay for inserting a new sibling between structural top-level
+  // items in the flow root. Only visible in Select Mode.
+  //
+  // `domIndex` is the RAW child index into flowRoot.children (not the
+  // structural array). This distinction matters when the flow root has
+  // non-structural children (hidden mobile-menu <input>, decorative <div>s):
+  // a structural index of 2 doesn't necessarily map to DOM index 2. The
+  // commit path (commitInlineEdit → target.children[N]) needs a DOM index.
+  const [insertGap, setInsertGap] = useState(null); // null | { top, left, width, domIndex }
+  // Persistent seam indicator shown while the insert CodePanel is open, so
+  // the user retains a spatial reference for where the code will land after
+  // the `+` overlay disappears on click. Coordinates are IN THE IFRAME's
+  // body coordinate system (position: absolute, relative to body) so the
+  // indicator naturally scrolls with content.
+  const [insertPreview, setInsertPreview] = useState(null); // null | { bodyY, bodyLeft, bodyWidth }
 
   const pageNames = Object.keys(pages || {});
   const rawHtml = pages?.[activePage] || '';
-  const withEmbeds = rawHtml
-    ? injectEmbeds(rawHtml, resolveEmbedsForPage(project?.embeds, activePage))
-    : '';
-  const html = withEmbeds ? rewriteUploadsUrls(withEmbeds, slug) : '';
+  const html = rawHtml ? rewriteUploadsUrls(rawHtml, slug) : '';
 
   // Sync displayHtml whenever the underlying html changes (chat responses,
   // page switches, tools changes, undo/redo).
@@ -129,62 +122,6 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     } catch {}
     onApplyTokens(newPages, projectPatch);
   };
-
-
-  // Translate an iframe-viewport rect into PARENT viewport coordinates.
-  const translateRect = useCallback((rect) => {
-    const iframe = iframeRef.current;
-    if (!iframe || !rect) return null;
-    const ifr = iframe.getBoundingClientRect();
-    return {
-      top: ifr.top + rect.top,
-      left: ifr.left + rect.left,
-      right: ifr.left + rect.right,
-      bottom: ifr.top + rect.bottom,
-      width: rect.width,
-      height: rect.height,
-    };
-  }, []);
-
-  // Update the iframe-side selection overlay div + the parent toolbar position
-  // for the currently-selected element. Reads chain/chainIndex via refs so
-  // long-lived iframe-scroll listeners always see the latest selection
-  // (otherwise the listener captures stale values from install time).
-  const repositionForSelection = useCallback(() => {
-    const iframe = iframeRef.current;
-    const doc = iframe?.contentDocument;
-    if (!doc) return;
-    const el = chainRef.current[chainIndexRef.current];
-    const overlay = doc.getElementById('__sel-active');
-    if (!el || !overlay) {
-      if (overlay) overlay.style.display = 'none';
-      setSelectionRect(null);
-      return;
-    }
-    const rect = el.getBoundingClientRect();
-    const win = iframe.contentWindow;
-    overlay.style.display = 'block';
-    overlay.style.top    = `${rect.top + (win?.scrollY || 0)}px`;
-    overlay.style.left   = `${rect.left + (win?.scrollX || 0)}px`;
-    overlay.style.width  = `${rect.width}px`;
-    overlay.style.height = `${rect.height}px`;
-    setSelectionRect(translateRect(rect));
-  }, [translateRect]);
-
-  // Clear all selection state.
-  const clearSelection = useCallback(() => {
-    setSelectorPath(null);
-    setSelectionFingerprint(null);
-    setChain([]);
-    setChainIndex(0);
-    setSelectionRect(null);
-    setActiveAction(null);
-    const doc = iframeRef.current?.contentDocument;
-    const overlay = doc?.getElementById('__sel-active');
-    if (overlay) overlay.style.display = 'none';
-    const hover = doc?.getElementById('__sel-hover');
-    if (hover) hover.style.display = 'none';
-  }, []);
 
   // Intercept iframe nav clicks; ALSO close any open popovers when the user
   // clicks anywhere inside the iframe (parent doc's mousedown listener can't
@@ -248,289 +185,6 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     return () => iframe.removeEventListener('load', onLoad);
   }, [displayHtml, pages, onActivePage]);
 
-  // ── Install selection overlays + listeners inside the iframe ──────────────
-  // Runs whenever displayHtml changes (iframe re-mounts) or selectMode flips.
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe || !displayHtml) return;
-
-    let mounted = true;
-    let cleanupFns = [];
-
-    const install = () => {
-      const doc = iframe.contentDocument;
-      const win = iframe.contentWindow;
-      if (!doc || !doc.body) return;
-      // Idempotency: never double-install on the same doc instance.
-      // (srcDoc swaps create a new doc, which won't carry this flag.)
-      if (doc.__selInstalled) return;
-      doc.__selInstalled = true;
-
-      // Inject overlay style + divs once per iframe doc.
-      if (!doc.getElementById('__sel-style')) {
-        const style = doc.createElement('style');
-        style.id = '__sel-style';
-        style.textContent = `
-          #__sel-hover, #__sel-active {
-            position: absolute;
-            /* !important so the global html.__sel-mode * { pointer-events:
-               auto !important } rule doesn't make our own overlays
-               mouse-targetable (which would cause a hover-flicker loop:
-               show overlay → target becomes overlay → hide → repeat). */
-            pointer-events: none !important;
-            z-index: 2147483646;
-            box-sizing: border-box;
-            display: none;
-          }
-          #__sel-hover {
-            outline: 1.5px dashed #7c9cff;
-            outline-offset: -1px;
-            background: rgba(124, 156, 255, 0.06);
-          }
-          #__sel-active {
-            outline: 2px solid #7c9cff;
-            outline-offset: -1px;
-            background: rgba(124, 156, 255, 0.10);
-          }
-          /* Force arrow cursor + make every element clickable while editing.
-             pointer-events:none is common on decorative overlays (gradients,
-             glows, bg-image layers) so they don't block clicks on the
-             design's interactive elements — but that also makes them
-             unreachable to our selection tool. We override only while
-             select mode is on; when it's off, the design behaves normally. */
-          html.__sel-mode, html.__sel-mode * {
-            cursor: default !important;
-            pointer-events: auto !important;
-          }
-        `;
-        doc.head.appendChild(style);
-      }
-      const ensureDiv = (id) => {
-        let el = doc.getElementById(id);
-        if (!el) {
-          el = doc.createElement('div');
-          el.id = id;
-          doc.body.appendChild(el);
-        }
-        return el;
-      };
-      const hoverEl = ensureDiv('__sel-hover');
-      const activeEl = ensureDiv('__sel-active');
-
-      // Re-resolve any existing selection path against the (possibly new) DOM.
-      // Path-only resolution is not enough — after a chat edit that removes
-      // an ancestor, the same indices can accidentally land on a sibling
-      // that is NOT the originally-selected element. Verify identity via
-      // fingerprint, and clear selection if it doesn't match.
-      if (selectorPath) {
-        const resolved = resolveSelectorPath(selectorPath, doc);
-        const stillSameEl = resolved && matchesFingerprint(selectionFingerprint, resolved);
-        if (resolved && stillSameEl) {
-          const newChain = getElementChain(resolved, doc);
-          if (mounted) {
-            setChain(newChain);
-            setChainIndex(i => Math.min(i, newChain.length - 1));
-          }
-        } else if (mounted) {
-          // Either the path no longer resolves, or it resolves to a
-          // different element. Clear selection in both cases.
-          setSelectorPath(null);
-          setSelectionFingerprint(null);
-          setChain([]);
-          setChainIndex(0);
-          setSelectionRect(null);
-          setActiveAction(null);
-        }
-      } else {
-        hoverEl.style.display = 'none';
-        activeEl.style.display = 'none';
-      }
-
-      const onMouseMove = (e) => {
-        if (!selectModeRef.current) {
-          hoverEl.style.display = 'none';
-          return;
-        }
-        let target = e.target;
-        // If the topmost hit is a legitimately-hidden surface (closed mobile
-        // overlay, stashed drawer) that the global pointer-events override
-        // re-enabled, walk down to the next selectable element underneath.
-        if (target === hoverEl || target === activeEl || !isSelectable(target, doc) || isVisuallyHidden(target)) {
-          const fallback = topSelectableAt(doc, e.clientX, e.clientY);
-          if (fallback) target = fallback;
-        }
-        // Clicking/hovering an icon's internals (path, g, …) should highlight
-        // the whole <svg>, not the inner node.
-        const svgRoot = target.closest && target.closest('svg');
-        if (svgRoot) target = svgRoot;
-        if (!isSelectable(target, doc) || target === hoverEl || target === activeEl) {
-          hoverEl.style.display = 'none';
-          return;
-        }
-        const r = target.getBoundingClientRect();
-        hoverEl.style.display = 'block';
-        hoverEl.style.top    = `${r.top + (win.scrollY || 0)}px`;
-        hoverEl.style.left   = `${r.left + (win.scrollX || 0)}px`;
-        hoverEl.style.width  = `${r.width}px`;
-        hoverEl.style.height = `${r.height}px`;
-      };
-      const onMouseLeave = () => { hoverEl.style.display = 'none'; };
-
-      // Tracks alt-click "dig" cycles. Holding Alt and clicking the same
-      // spot repeatedly walks through every selectable element under the
-      // cursor (top → bottom → wrap), letting the user reach images that
-      // sit beneath overlays / gradients / decorative siblings with a
-      // higher z-index.
-      let lastAltClick = { x: -1, y: -1, idx: -1 };
-
-      // Capture-phase click handler — intercepts before anchor handlers
-      // (which were attached on bubble in the onLoad effect above).
-      const onClickCapture = (e) => {
-        if (!selectModeRef.current) return;
-        let target = e.target;
-
-        if (e.altKey) {
-          // Find every selectable element at the cursor, top-to-bottom.
-          const stack = doc.elementsFromPoint
-            ? doc.elementsFromPoint(e.clientX, e.clientY).filter(el => isSelectable(el, doc))
-            : [];
-          if (stack.length > 1) {
-            // Same spot as last alt-click? advance index. Else start at 1
-            // (skip the topmost, since a regular click already gives them that).
-            const samePos = Math.abs(e.clientX - lastAltClick.x) < 6 &&
-                            Math.abs(e.clientY - lastAltClick.y) < 6;
-            const nextIdx = samePos
-              ? (lastAltClick.idx + 1) % stack.length
-              : 1;
-            target = stack[nextIdx];
-            lastAltClick = { x: e.clientX, y: e.clientY, idx: nextIdx };
-          }
-        } else {
-          lastAltClick = { x: -1, y: -1, idx: -1 };
-          // Same fallback as onMouseMove: if the topmost hit is a hidden
-          // overlay re-enabled by the select-mode pointer-events override,
-          // walk to the next visible selectable element underneath.
-          if (!isSelectable(target, doc) || isVisuallyHidden(target)) {
-            const fallback = topSelectableAt(doc, e.clientX, e.clientY);
-            if (fallback) target = fallback;
-          }
-        }
-
-        // Selecting any part of an icon resolves to the whole <svg>.
-        const svgRoot = target.closest && target.closest('svg');
-        if (svgRoot) target = svgRoot;
-
-        if (!isSelectable(target, doc)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const path = getSelectorPath(target, doc);
-        if (!path) return;
-        const newChain = getElementChain(target, doc);
-        setSelectorPath(path);
-        setSelectionFingerprint(fingerprintElement(target));
-        setChain(newChain);
-        setChainIndex(newChain.length - 1);
-        setActiveAction(null);
-      };
-
-      const onScroll = () => repositionForSelection();
-
-      doc.addEventListener('mousemove', onMouseMove);
-      doc.addEventListener('mouseleave', onMouseLeave);
-      doc.addEventListener('click', onClickCapture, { capture: true });
-      win.addEventListener('scroll', onScroll, { passive: true });
-
-      cleanupFns.push(() => {
-        doc.removeEventListener('mousemove', onMouseMove);
-        doc.removeEventListener('mouseleave', onMouseLeave);
-        doc.removeEventListener('click', onClickCapture, { capture: true });
-        win.removeEventListener('scroll', onScroll);
-      });
-    };
-
-    // Two install triggers — always attach the load listener (so srcDoc
-    // swaps get fresh listeners on the new doc) AND attempt right now (in
-    // case the doc is already loaded by the time this effect runs). The
-    // __selInstalled flag on the doc makes both paths idempotent per-doc.
-    iframe.addEventListener('load', install);
-    install();
-    cleanupFns.push(() => iframe.removeEventListener('load', install));
-
-    return () => {
-      mounted = false;
-      // Clear the install marker on the current doc so a fresh effect
-      // iteration can re-install if React re-runs us for the same doc.
-      try {
-        const d = iframe.contentDocument;
-        if (d) delete d.__selInstalled;
-      } catch {}
-      cleanupFns.forEach(fn => { try { fn(); } catch {} });
-    };
-    // Re-install when iframe content changes. selectorPath intentionally NOT
-    // a dep — we resolve it inside install using the closure's value, and
-    // a separate effect handles selection-only updates.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayHtml]);
-
-  // When chain / chainIndex change, reposition overlay + parent toolbar.
-  useEffect(() => {
-    repositionForSelection();
-  }, [chain, chainIndex, repositionForSelection]);
-
-  // Reposition on parent window resize.
-  useEffect(() => {
-    const onResize = () => repositionForSelection();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [repositionForSelection]);
-
-  // Esc to deselect.
-  useEffect(() => {
-    if (!selectorPath) return;
-    const onKey = (e) => {
-      if (e.key === 'Escape') {
-        clearSelection();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selectorPath, clearSelection]);
-
-  // Clicking anywhere in the parent doc outside the iframe + selection UI
-  // deselects. Clicks INSIDE the iframe never reach this listener (iframe
-  // events don't propagate to parent doc), so the iframe-side click handler
-  // still gets to do its own selection logic. Protected zones: the iframe
-  // element itself (scrollbar, border), the floating selection toolbar, and
-  // the floating selection panel.
-  useEffect(() => {
-    if (!selectorPath) return;
-    const onMouseDown = (e) => {
-      const t = e.target;
-      if (!t) return;
-      if (iframeRef.current && t === iframeRef.current) return;
-      // Protect modal dialogs (Edit Link, etc.) — they're rendered outside
-      // the iframe and the selection chrome, so without this exemption every
-      // click inside the dialog would clear the very selection the dialog
-      // is about to mutate. `.modal-backdrop` covers any current/future
-      // modal that reuses the standard overlay class.
-      if (t.closest && (t.closest('.selection-toolbar') || t.closest('.selection-panel') || t.closest('.modal-backdrop'))) return;
-      clearSelection();
-    };
-    document.addEventListener('mousedown', onMouseDown, true);
-    return () => document.removeEventListener('mousedown', onMouseDown, true);
-  }, [selectorPath, clearSelection]);
-
-  // Clear selection when select mode is turned off.
-  useEffect(() => {
-    if (!selectMode) clearSelection();
-  }, [selectMode, clearSelection]);
-
-  // Force arrow cursor inside iframe when select mode is on.
-  useEffect(() => {
-    const doc = iframeRef.current?.contentDocument;
-    if (!doc?.documentElement) return;
-    doc.documentElement.classList.toggle('__sel-mode', selectMode);
-  }, [selectMode, displayHtml]);
 
   // Inject the canonical animations runtime (CSS + JS) into every iframe doc,
   // plus per-effect override CSS for any toggle that's off. The runtime is
@@ -587,6 +241,326 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
     iframe.addEventListener('load', apply);
     return () => iframe.removeEventListener('load', apply);
   }, [effects, displayHtml]);
+
+  // Inject user code (page/global head, page/global body-end, global CSS)
+  // as runtime slots so changes reflect live without reloading the iframe.
+  // Order rationale:
+  //   Head:  global-head → page-head → global-css
+  //     - Global scripts (analytics, tracking) load first so per-page scripts
+  //       can depend on globals being ready.
+  //     - global-css is always last so it wins the CSS cascade over any
+  //       inline <style> the page carries.
+  //   Body:  global-body-end → page-body-end
+  //     - Same rationale: global widgets init first, page scripts run after.
+  const pageHead = project?.pageCode?.[activePage]?.head || '';
+  const pageBodyEnd = project?.pageCode?.[activePage]?.bodyEnd || '';
+  const globalHead = project?.globalHead || '';
+  const globalBodyEnd = project?.globalBodyEnd || '';
+  const globalCss = project?.globalCss || '';
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !displayHtml) return;
+    const apply = () => {
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc) return;
+        applyCodeSlots(doc, [
+          { slot: 'global-head',    container: doc.head, html: globalHead },
+          { slot: 'page-head',      container: doc.head, html: pageHead },
+          { slot: 'global-css',     container: doc.head, html: globalCss ? `<style>${globalCss}</style>` : '' },
+          { slot: 'global-body-end',container: doc.body, html: globalBodyEnd },
+          { slot: 'page-body-end',  container: doc.body, html: pageBodyEnd },
+        ]);
+      } catch {}
+    };
+    apply();
+    iframe.addEventListener('load', apply);
+    return () => iframe.removeEventListener('load', apply);
+  }, [displayHtml, pageHead, pageBodyEnd, globalHead, globalBodyEnd, globalCss]);
+
+  // ── Hover-`+` between sibling structural items ─────────────────────────
+  // Track mouse position inside the iframe. When it's close to a boundary
+  // between two structural top-level items (bottom of item N / top of item
+  // N+1), surface a `+` overlay so the user can insert a new sibling. Also
+  // covers the "before first" position — the fix for fixed-header cases
+  // where hovering above the header is normally impossible.
+  //
+  // Gated by Select Mode: the affordance only appears while the user is in
+  // editing mode. Keeps the preview visually clean during normal browsing.
+  useEffect(() => {
+    if (!selectMode) { setInsertGap(null); return; }
+    const iframe = iframeRef.current;
+    if (!iframe || !displayHtml) return;
+
+    // Cached gap descriptors. Each corresponds to a hoverable gap between
+    // structural top-level items (plus one before the first and one after
+    // the last). `domIndex` is the position in flowRoot.children where a
+    // new sibling should be inserted — computed here, so it survives the
+    // structural-vs-DOM-index mismatch when the flow root has hidden
+    // helpers (mobile-menu <input>) mixed in.
+    let gaps = []; // [{ y, left, width, domIndex }]
+
+    const recompute = () => {
+      const doc = iframe.contentDocument;
+      if (!doc) { gaps = []; return; }
+      const flowRoot = getFlowRoot(doc);
+      if (!flowRoot) { gaps = []; return; }
+      const flowChildren = Array.from(flowRoot.children);
+      const struct = getStructuralChildren(doc);
+      if (struct.length === 0) { gaps = []; return; }
+      const next = [];
+      const first = struct[0];
+      const firstRect = first.getBoundingClientRect();
+      // Gap BEFORE the first structural item — insert at the DOM position
+      // of that item (which may be > 0 if hidden helpers precede it).
+      next.push({
+        y: firstRect.top,
+        left: firstRect.left,
+        width: firstRect.width,
+        domIndex: flowChildren.indexOf(first),
+      });
+      // Gap AFTER each structural item — insert at the DOM position of the
+      // next structural item, or append if this is the last one.
+      for (let i = 0; i < struct.length; i++) {
+        const el = struct[i];
+        const r = el.getBoundingClientRect();
+        const nextEl = struct[i + 1];
+        const domIndex = nextEl
+          ? flowChildren.indexOf(nextEl)
+          : flowChildren.length;
+        next.push({
+          y: r.bottom,
+          left: r.left,
+          width: r.width,
+          domIndex,
+        });
+      }
+      gaps = next;
+    };
+
+    const THRESHOLD = 24;
+
+    const onMouseMove = (e) => {
+      // Recompute on every mousemove. Rects shift for reasons the scroll /
+      // resize / load listeners don't cover — Google Fonts finishing load
+      // after initial paint, images resolving, chat edits mutating pages,
+      // scroll animations revealing content. A few getBoundingClientRect
+      // calls per structural child (usually 3-10) is trivially cheap and
+      // guarantees we're always comparing against current layout.
+      recompute();
+      if (gaps.length === 0) return;
+      const y = e.clientY;
+      let match = null;
+      // Iterate all gaps; pick the closest one within threshold. Ties go
+      // to later gaps (a natural preference: hovering exactly between two
+      // sections lands on the boundary just crossed).
+      for (const g of gaps) {
+        if (Math.abs(y - g.y) < THRESHOLD) match = g;
+      }
+      if (!match) {
+        setInsertGap(null);
+        return;
+      }
+      const ifr = iframe.getBoundingClientRect();
+      setInsertGap(prev => {
+        const next = {
+          top: ifr.top + match.y,
+          left: ifr.left + match.left,
+          width: match.width,
+          domIndex: match.domIndex,
+        };
+        if (prev &&
+            prev.top === next.top &&
+            prev.left === next.left &&
+            prev.width === next.width &&
+            prev.domIndex === next.domIndex) {
+          return prev;
+        }
+        return next;
+      });
+    };
+
+    const install = () => {
+      const doc = iframe.contentDocument;
+      const win = iframe.contentWindow;
+      if (!doc || !win) return;
+      recompute();
+      doc.addEventListener('mousemove', onMouseMove);
+      win.addEventListener('scroll', recompute, { passive: true });
+      win.addEventListener('resize', recompute);
+    };
+    const uninstall = () => {
+      const doc = iframe.contentDocument;
+      const win = iframe.contentWindow;
+      if (doc) doc.removeEventListener('mousemove', onMouseMove);
+      if (win) {
+        win.removeEventListener('scroll', recompute);
+        win.removeEventListener('resize', recompute);
+      }
+    };
+
+    iframe.addEventListener('load', install);
+    install();
+    return () => {
+      uninstall();
+      iframe.removeEventListener('load', install);
+    };
+  }, [displayHtml, selectMode]);
+
+  // ── Open the CodePanel session for a new sibling insert. ────────────────
+  // Used by both the hover-`+` overlay and the SelectionToolbar's Insert
+  // above / Insert below actions. Kept as a callback so both entry points
+  // agree on placeholder, title, and commit flow.
+  const openInsertPanel = useCallback(({ domIndex, labelPos, tagLabel }) => {
+    if (!onOpenCodePanel) return;
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+    const flowRoot = getFlowRoot(doc);
+    if (!flowRoot) return;
+    const flowRootPath = getSelectorPath(flowRoot, doc); // [] when flow root is body
+    const savedActivePage = activePage;
+    const title = tagLabel && labelPos
+      ? `Insert ${labelPos} <${tagLabel}>`
+      : 'Insert section';
+
+    // Compute the seam position in the iframe's body coordinate system so
+    // the indicator scrolls with content. When the anchor exists (inserting
+    // BEFORE some element), use its top edge. When appending, use the
+    // bottom of the last structural item.
+    const iframe = iframeRef.current;
+    const win = iframe?.contentWindow;
+    if (iframe && win) {
+      const flowChildren = Array.from(flowRoot.children);
+      const anchorEl = flowChildren[domIndex];
+      let seam = null;
+      const scrollX = win.scrollX || 0;
+      const scrollY = win.scrollY || 0;
+      if (anchorEl) {
+        const r = anchorEl.getBoundingClientRect();
+        seam = { bodyY: r.top + scrollY, bodyLeft: r.left + scrollX, bodyWidth: r.width };
+      } else {
+        const struct = getStructuralChildren(doc);
+        const last = struct[struct.length - 1];
+        if (last) {
+          const r = last.getBoundingClientRect();
+          seam = { bodyY: r.bottom + scrollY, bodyLeft: r.left + scrollX, bodyWidth: r.width };
+        }
+      }
+      if (seam) setInsertPreview(seam);
+    }
+
+    onOpenCodePanel({
+      key: `insert-${savedActivePage}-${domIndex}`,
+      title,
+      tabs: [{
+        id: 'html',
+        label: 'HTML',
+        lang: 'html',
+        value: '',
+        placeholder: '<section>\n  \n</section>',
+      }],
+      onSave: (values) => {
+        const markup = (values.html || '').trim();
+        setInsertPreview(null);
+        if (!markup) return;
+        const newHtml = commitInlineEdit({
+          sourceHtml: pages?.[savedActivePage] || '',
+          selectorPath: flowRootPath,
+          mutator: (target, tdoc) => {
+            const tmpl = tdoc.createElement('template');
+            tmpl.innerHTML = markup;
+            const nodes = Array.from(tmpl.content.childNodes);
+            if (nodes.length === 0) return;
+            const anchor = target.children[domIndex] || null;
+            for (const node of nodes) {
+              if (anchor) target.insertBefore(node, anchor);
+              else target.appendChild(node);
+            }
+          },
+        });
+        if (!newHtml) {
+          console.warn('[insert] commit failed');
+          return;
+        }
+        onApplyTokens({ ...pages, [savedActivePage]: newHtml });
+      },
+      onCancel: () => { setInsertPreview(null); },
+    });
+  }, [onOpenCodePanel, activePage, pages, onApplyTokens]);
+
+  // Safety net: clear the preview if select mode is toggled off while the
+  // panel is open (edge case — cancel/save already cover the normal path).
+  useEffect(() => {
+    if (!selectMode) setInsertPreview(null);
+  }, [selectMode]);
+
+  // Inject / remove a dashed seam indicator inside the iframe body while
+  // insertPreview is set. Living inside the iframe (position: absolute in
+  // body coords) means it scrolls with content — no fixed-overlap with the
+  // CodePanel or drift on scroll.
+  //
+  // Green + white-outlined so it visually separates from the blue Select
+  // hover state (`__sel-hover` / `__sel-active`).
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    // The injection lives in the iframe's contentDocument. We need to
+    // re-inject whenever the doc changes (srcDoc swap on chat edit / undo)
+    // AND right now if state is set. Wrap both entry points in a helper.
+    const inject = () => {
+      const doc = iframe.contentDocument;
+      if (!doc?.body) return;
+      // Start clean — remove any stale indicator from a prior state.
+      doc.querySelectorAll('[data-slot="__insert-preview"]').forEach(el => el.remove());
+      if (!insertPreview) return;
+      const div = doc.createElement('div');
+      div.setAttribute('data-slot', '__insert-preview');
+      div.style.cssText = [
+        'position: absolute',
+        `top: ${insertPreview.bodyY}px`,
+        `left: ${insertPreview.bodyLeft}px`,
+        `width: ${insertPreview.bodyWidth}px`,
+        'height: 0',
+        'border-top: 3px dashed #22c55e',
+        'z-index: 2147483644',
+        'pointer-events: none',
+        'transform: translateY(-1.5px)',
+      ].join(';');
+      const label = doc.createElement('span');
+      label.textContent = 'Insert here';
+      label.style.cssText = [
+        'position: absolute',
+        'top: -12px',
+        'left: 12px',
+        'background: #22c55e',
+        'color: #0b1a10',
+        'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        'font-size: 11px',
+        'font-weight: 700',
+        'letter-spacing: 0.02em',
+        'padding: 3px 10px',
+        'border-radius: 999px',
+        'white-space: nowrap',
+        'line-height: 1',
+        // White outline + subtle drop shadow so it reads against any bg.
+        'box-shadow: 0 0 0 2px #ffffff, 0 3px 8px rgba(0, 0, 0, 0.4)',
+      ].join(';');
+      div.appendChild(label);
+      doc.body.appendChild(div);
+    };
+
+    inject();
+    // Also re-inject after any iframe reload (chat edit re-renders the doc,
+    // wiping our injection — but the user might still have the panel open
+    // if they multi-click).
+    iframe.addEventListener('load', inject);
+    return () => {
+      iframe.removeEventListener('load', inject);
+      const doc = iframe.contentDocument;
+      doc?.querySelectorAll('[data-slot="__insert-preview"]').forEach(el => el.remove());
+    };
+  }, [insertPreview, displayHtml]);
 
   const openFullScreen = () => {
     if (!html) return;
@@ -710,6 +684,45 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
             No design yet. Send a message in chat to generate one.
           </div>
         )}
+        {selectMode && insertGap && (
+          <>
+            {/* Passive hairline — visual only, doesn't intercept clicks so
+                the surrounding preview stays interactive. */}
+            <div
+              className="section-insert-line"
+              style={{
+                top: insertGap.top,
+                left: insertGap.left,
+                width: insertGap.width,
+              }}
+              aria-hidden="true"
+            />
+            {/* Interactive circle — the only clickable part. Centered on the
+                gap width so the click target sits over the seam. */}
+            <button
+              type="button"
+              className="section-insert-btn"
+              style={{
+                top: insertGap.top,
+                left: insertGap.left + insertGap.width / 2,
+              }}
+              onClick={() => {
+                openInsertPanel({ domIndex: insertGap.domIndex });
+                setInsertGap(null);
+              }}
+              aria-label="Insert section here"
+              title="Insert section here"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M8 3.5V12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M3.5 8H12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </>
+        )}
+        {/* Persistent seam indicator lives INSIDE the iframe (see the
+            insertPreview effect above), so it scrolls with content and
+            doesn't overlap the CodePanel. Nothing rendered here. */}
         {selectMode && selectionRect && chain.length > 0 && (
           <SelectionToolbar
             rect={selectionRect}
@@ -800,6 +813,73 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 });
                 // Keep the visual selection so the user has spatial reference
                 // while typing the prompt. Don't open the drawer panel.
+                return;
+              }
+              if (actionId === 'insert-above' || actionId === 'insert-below') {
+                // Sibling insert: the selected element is a top-level structural
+                // item under the flow root. Find its DOM index and delegate to
+                // openInsertPanel (same commit path as the hover-`+` overlay).
+                const el = chain[chainIndex];
+                const doc = iframeRef.current?.contentDocument;
+                if (!el || !doc) return;
+                const flowRoot = getFlowRoot(doc);
+                if (!flowRoot) return;
+                const kids = Array.from(flowRoot.children);
+                const idx = kids.indexOf(el);
+                if (idx < 0) return;
+                const domIndex = actionId === 'insert-above' ? idx : idx + 1;
+                openInsertPanel({
+                  domIndex,
+                  labelPos: actionId === 'insert-above' ? 'above' : 'below',
+                  tagLabel: el.tagName.toLowerCase(),
+                });
+                return;
+              }
+              if (actionId === 'edit-code') {
+                // Open the code panel with the element's outerHTML. On save,
+                // parse the new markup and replace the element in the source
+                // HTML through the same commitInlineEdit pipeline every other
+                // action uses. Multi-root paste is fine — replaceWith accepts
+                // any number of siblings.
+                const el = chain[chainIndex];
+                if (!el || !selectorPath || !onOpenCodePanel) return;
+                const tag = el.tagName.toLowerCase();
+                const savedSelectorPath = selectorPath;
+                const savedActivePage = activePage;
+                onOpenCodePanel({
+                  key: `edit-code-${savedSelectorPath.join('.')}`,
+                  title: `Edit <${tag}>`,
+                  tabs: [
+                    { id: 'html', label: 'HTML', lang: 'html', value: el.outerHTML },
+                  ],
+                  onSave: (values) => {
+                    const nextMarkup = values.html || '';
+                    const newHtml = commitInlineEdit({
+                      sourceHtml: pages?.[savedActivePage] || '',
+                      selectorPath: savedSelectorPath,
+                      mutator: (target, doc) => {
+                        const tmpl = doc.createElement('template');
+                        tmpl.innerHTML = nextMarkup;
+                        const nodes = Array.from(tmpl.content.childNodes);
+                        if (nodes.length === 0) {
+                          target.remove();
+                          return;
+                        }
+                        target.replaceWith(...nodes);
+                      },
+                    });
+                    if (!newHtml) {
+                      console.warn('[edit-code] commit failed: could not resolve element');
+                      return;
+                    }
+                    onApplyTokens({ ...pages, [savedActivePage]: newHtml });
+                    // Clear selection — the old fingerprint no longer matches
+                    // the new markup, so leaving it stale would cause the
+                    // next iframe reload to strand the selection UI.
+                    clearSelection();
+                  },
+                  onCancel: () => {},
+                });
                 return;
               }
               setActiveAction(actionId);
@@ -977,4 +1057,41 @@ function rewriteUploadsUrls(html, slug) {
   const re = new RegExp(`url\\(\\s*${DELIM}(?:\\.\\/)?uploads\\/([^)\\s"'&]+)\\s*${DELIM}\\s*\\)`, 'g');
   result = result.replace(re, (_, file) => `url(${base}${file})`);
   return result;
+}
+
+// Apply a list of code slots to an iframe document. Each slot has a name
+// (used as data-slot attribute for cleanup), a container element (doc.head
+// or doc.body), and a raw HTML string. Behavior:
+//   - All existing elements with the given slot name are removed first.
+//   - Then all slots are re-inserted in list order. Later slots appear later
+//     in the DOM, so a globalHead injection wins CSS cascade over a pageHead
+//     injection at the same specificity.
+//   - <script> tags are re-created (not innerHTML-parsed) so they execute.
+function applyCodeSlots(doc, slots) {
+  // Remove existing slot nodes across every listed slot name.
+  const slotNames = slots.map(s => s.slot);
+  for (const name of slotNames) {
+    doc.querySelectorAll(`[data-slot="${name}"]`).forEach(el => el.remove());
+  }
+  // Insert in order.
+  for (const { slot, container, html } of slots) {
+    if (!html || !container) continue;
+    const tmpl = doc.createElement('template');
+    tmpl.innerHTML = html;
+    const nodes = Array.from(tmpl.content.childNodes);
+    for (const node of nodes) {
+      if (node.nodeType !== 1) continue; // skip whitespace text nodes
+      let toInsert = node;
+      if (node.nodeName === 'SCRIPT') {
+        // Scripts inserted via innerHTML/template.content do NOT execute.
+        // Re-create as a fresh script element so the browser runs it.
+        const s = doc.createElement('script');
+        for (const attr of node.attributes) s.setAttribute(attr.name, attr.value);
+        s.textContent = node.textContent;
+        toInsert = s;
+      }
+      toInsert.setAttribute('data-slot', slot);
+      container.appendChild(toInsert);
+    }
+  }
 }

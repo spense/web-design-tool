@@ -205,3 +205,80 @@ export function topSelectableAt(doc, x, y) {
   }
   return null;
 }
+
+// ── Flow root & structural children ──────────────────────────────────────
+// The "flow root" is the element whose children are the page's top-level
+// structural items (headers, sections, footers). Future-proofs against
+// designs that wrap everything in <main> or a top-level container div —
+// callers get the right container without hardcoding <body>.
+//
+// Rules:
+//   1. If <body> has exactly one direct <main> child (its usual role), the
+//      flow root is that <main>.
+//   2. Otherwise flow root is <body>.
+export function getFlowRoot(doc) {
+  if (!doc?.body) return null;
+  const bodyKids = Array.from(doc.body.children).filter(isStructuralChild);
+  const structuralMains = bodyKids.filter(el => el.tagName === 'MAIN');
+  if (structuralMains.length === 1) return structuralMains[0];
+  return doc.body;
+}
+
+// Utility / non-rendered tags that shouldn't be treated as structural.
+const NON_STRUCTURAL_TAGS = new Set([
+  'SCRIPT', 'STYLE', 'TEMPLATE', 'LINK', 'META', 'NOSCRIPT', 'BASE', 'TITLE',
+]);
+
+// True when `el` is a valid "top-level structural item" — the kind of thing
+// the user would drop a new section around. Filters out:
+//   - Non-rendered utility tags (see above)
+//   - Our own runtime injections (selection overlays, animation runtime,
+//     code slots, insert preview) — these are chrome, not content
+//   - Hidden mobile toggles / drawers (visually hidden checkboxes with 0×0 rect)
+//   - Elements with display:none / visibility:hidden / opacity:0
+// Keeps <header>, <section>, <footer>, <article>, <aside>, <nav>, <div>,
+// custom elements, and anything else with actual layout.
+export function isStructuralChild(el) {
+  if (!el || !el.tagName || el.nodeType !== 1) return false;
+  if (NON_STRUCTURAL_TAGS.has(el.tagName)) return false;
+  if (el.hasAttribute && el.hasAttribute('hidden')) return false;
+  // Hidden inputs (mobile menu checkbox pattern) — never structural.
+  if (el.tagName === 'INPUT' && el.getAttribute('type') === 'hidden') return false;
+  // Our own runtime injections. `__` id prefix covers selection overlays
+  // (`__sel-hover`, `__sel-active`) and animation runtime (`__cinder-anim-*`).
+  // `data-slot` covers code-slot injections and the insert preview label.
+  // Critical because `__sel-hover` moves with the mouse — treating it as
+  // structural makes the section-insert affordance chase the cursor.
+  if (el.id && el.id.startsWith('__')) return false;
+  if (el.hasAttribute && el.hasAttribute('data-slot')) return false;
+  // Visibility check: zero rect + off-screen means it's a hidden toggle/drawer.
+  // We deliberately do NOT recurse into ancestors here (isVisuallyHidden's
+  // job) — the flow root's own visibility is what matters for its children.
+  const win = el.ownerDocument?.defaultView;
+  if (win) {
+    const cs = win.getComputedStyle(el);
+    if (cs.display === 'none') return false;
+    if (cs.visibility === 'hidden' || cs.visibility === 'collapse') return false;
+    if (parseFloat(cs.opacity) === 0) return false;
+  }
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 && r.height === 0) return false;
+  return true;
+}
+
+// Ordered list of structural children of the flow root. Used both for the
+// hover-`+` gap positioning and for locating the insertion index in the
+// SAVED HTML (via getSelectorPath on the anchor child).
+export function getStructuralChildren(doc) {
+  const root = getFlowRoot(doc);
+  if (!root) return [];
+  return Array.from(root.children).filter(isStructuralChild);
+}
+
+// True when `el` sits directly under the flow root and passes the structural
+// predicate. Toolbar shows Insert Above / Insert Below only for these.
+export function isStructuralTopLevel(el, doc) {
+  if (!el) return false;
+  const root = getFlowRoot(doc);
+  return !!root && el.parentElement === root && isStructuralChild(el);
+}

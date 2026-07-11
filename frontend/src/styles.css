@@ -145,7 +145,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   flex: 1;
   min-height: 0;
 }
-.chat-panel {
+/* Shared slot for the left-hand panel. Owns width + chrome so switching
+   between ChatPanel and CodePanel is a class flip that animates smoothly. */
+.project-panel-slot {
   width: 25%;
   min-width: 300px;
   max-width: 480px;
@@ -153,6 +155,103 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   flex-direction: column;
   background: var(--bg-elev);
   border-right: 1px solid var(--border);
+  transition: max-width 220ms ease, width 220ms ease, min-width 220ms ease;
+}
+.project-panel-slot.is-code {
+  width: 40%;
+  min-width: 480px;
+  max-width: 720px;
+}
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+.code-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+.code-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.code-panel-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-panel-cancel,
+.code-panel-save {
+  padding: 6px 14px;
+}
+.code-panel-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.code-panel-tab {
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+}
+.code-panel-tab:hover { color: var(--text); background: var(--bg-elev-2); }
+.code-panel-tab.active {
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.code-panel-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.code-panel-editor .cm-editor { height: 100%; }
+.code-panel-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: rgba(217, 122, 122, 0.14);
+  border-top: 1px solid rgba(217, 122, 122, 0.35);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.code-panel-error-lang {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--danger);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(217, 122, 122, 0.4);
+  white-space: nowrap;
+}
+.code-panel-error-msg {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  word-break: break-word;
 }
 .preview-panel {
   flex: 1;
@@ -751,6 +850,56 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   from { opacity: 0; transform: translateY(-4px) scale(0.96); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
+/* Section insert overlay — a hairline behind a circular "+" button. Only
+   the circle intercepts clicks; the hairline is a decorative sibling. Both
+   are position: fixed in the parent viewport, positioned from iframe rects
+   via the code in PreviewPanel. */
+.section-insert-line {
+  position: fixed;
+  z-index: 98;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.55;
+  transform: translateY(-50%);
+  pointer-events: none;
+  transition: opacity 100ms ease;
+}
+.section-insert-btn {
+  position: fixed;
+  z-index: 99;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-on);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+.section-insert-btn:hover {
+  background: var(--accent);
+  transform: translate(-50%, -50%) scale(1.06);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+.section-insert-btn:hover + .section-insert-line,
+.section-insert-btn ~ .section-insert-line {
+  /* No-op — kept for future coupled-hover states if needed. */
+}
+.section-insert-btn svg {
+  display: block;
+}
+
+/* Persistent seam indicator now lives inside the iframe body (see the
+   insertPreview effect in PreviewPanel.jsx) so it scrolls with content and
+   doesn't overlap the CodePanel. Style is inline on the injected element. */
+
 .selection-toolbar {
   position: fixed;
   z-index: 100;
@@ -1495,206 +1644,6 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .tools-toggle-row.is-off { opacity: 0.25; }
 .tools-toggle-row .label { flex: 1; }
 .tools-toggles { display: flex; flex-direction: column; gap: 4px; }
-
-/* Embed popover — lives on the chat scope bar, left of the page-actions
-   ellipsis. Scope-aware: lists embeds for the current chat scope (All Pages
-   → site-wide; page → page-scoped + inherited site-wide chips). */
-.embed-wrap {
-  position: relative;
-}
-.embed-btn.active {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-.embed-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  width: 380px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px;
-  z-index: 50;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  font-size: 12px;
-}
-.embed-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.embed-title {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--text);
-}
-.embed-scope-prefix {
-  color: var(--text-dim);
-  font-weight: 400;
-  margin-right: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 10.5px;
-}
-.embed-add-btn {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-.embed-empty {
-  font-size: 12px;
-  color: var(--text-dim);
-  line-height: 1.5;
-  padding: 6px 2px;
-}
-.embed-empty code {
-  font-family: var(--mono);
-  background: var(--bg);
-  padding: 1px 4px;
-  border-radius: 4px;
-  font-size: 11px;
-}
-.embed-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.embed-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-.embed-row-main {
-  flex: 1;
-  min-width: 0;
-}
-.embed-row-name {
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 2px;
-}
-.embed-row-meta {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--text-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.embed-row-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.embed-row-actions button {
-  padding: 4px 8px;
-  font-size: 11px;
-}
-.embed-row-actions .danger {
-  color: #e87d7d;
-  border-color: transparent;
-  background: transparent;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-}
-.embed-row-actions .danger:hover {
-  background: var(--border);
-}
-.embed-inherited {
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-}
-.embed-inherited-label {
-  font-family: var(--mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
-  margin-bottom: 6px;
-}
-.embed-inherited-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.embed-inherited-list li {
-  display: inline-flex;
-  padding: 2px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--pill);
-  font-size: 11px;
-  color: var(--text-dim);
-}
-.embed-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.embed-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.embed-field-label {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
-}
-.embed-field input,
-.embed-field textarea {
-  width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 12px;
-}
-.embed-field textarea {
-  font-family: var(--mono);
-  font-size: 11px;
-  resize: vertical;
-  min-height: 120px;
-  line-height: 1.45;
-}
-.embed-field input:focus,
-.embed-field textarea:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.embed-editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.embed-editor-actions button {
-  padding: 6px 14px;
-  font-size: 12px;
-}
 
 /* Favicon section */
 .favicon-empty {
