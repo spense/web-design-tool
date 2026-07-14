@@ -235,6 +235,12 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
           doc.body.appendChild(s);
           s.remove();
         }
+        // 5. Hand the current effect state to the runtime so it can tear down
+        // effects whose inline DOM changes can't be neutralized by CSS alone
+        // (parallax's img-fallback transform, oversized inset/height, etc.).
+        if (iframe.contentWindow?.__cinderAnim?.setEffects) {
+          iframe.contentWindow.__cinderAnim.setEffects(effects);
+        }
       } catch {}
     };
     apply();

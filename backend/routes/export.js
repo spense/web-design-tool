@@ -140,8 +140,12 @@ async function runExport(slug, project, pages, session) {
     const effects = normalizeAnimations(project);
     const overrideCss = buildEffectOverrideCss(effects);
     const countUpOff = buildCountUpOffScript(effects);
+    // Runtime handoff: some effects (parallax's img-fallback) can't be gated
+    // by CSS alone, so tell the runtime the current toggle state right after
+    // it bootstraps so it can tear those effects down at load time.
+    const setEffectsScript = `window.__cinderAnim&&window.__cinderAnim.setEffects(${JSON.stringify(effects)});`;
     for (const [name, html] of Object.entries(htmlFiles)) {
-      htmlFiles[name] = injectAnimationsRuntime(html, overrideCss, countUpOff);
+      htmlFiles[name] = injectAnimationsRuntime(html, overrideCss, countUpOff, setEffectsScript);
     }
 
     // Favicon: figure out which files we'll ship. Inject <link> tags into
@@ -280,7 +284,7 @@ function buildFaviconLinkBlock(favicon) {
 
 // Inject the canonical animations payload + any per-effect overrides into
 // an HTML page. Idempotent — looks for known ids before injecting again.
-function injectAnimationsRuntime(html, overrideCss, countUpOff) {
+function injectAnimationsRuntime(html, overrideCss, countUpOff, setEffectsScript) {
   let out = html;
   const baseStyle = `  <style id="cinder-anim-css">${ANIMATIONS_CSS}</style>\n`;
   const baseScript = `  <script id="cinder-anim-js">${ANIMATIONS_JS}</script>\n`;
@@ -290,15 +294,18 @@ function injectAnimationsRuntime(html, overrideCss, countUpOff) {
   const countUpScript = countUpOff
     ? `  <script id="cinder-anim-countup-off">${countUpOff}</script>\n`
     : '';
+  const effectsScript = setEffectsScript
+    ? `  <script id="cinder-anim-set-effects">${setEffectsScript}</script>\n`
+    : '';
   if (/<\/head>/i.test(out) && !/id=["']cinder-anim-css["']/.test(out)) {
     out = out.replace(/<\/head>/i, `${baseStyle}${overrideStyle}</head>`);
   } else if (overrideStyle && !/id=["']cinder-anim-override["']/.test(out)) {
     out = out.replace(/<\/head>/i, `${overrideStyle}</head>`);
   }
   if (/<\/body>/i.test(out) && !/id=["']cinder-anim-js["']/.test(out)) {
-    out = out.replace(/<\/body>/i, `${baseScript}${countUpScript}</body>`);
+    out = out.replace(/<\/body>/i, `${baseScript}${effectsScript}${countUpScript}</body>`);
   } else if (countUpScript && !/id=["']cinder-anim-countup-off["']/.test(out)) {
-    out = out.replace(/<\/body>/i, `${countUpScript}</body>`);
+    out = out.replace(/<\/body>/i, `${effectsScript}${countUpScript}</body>`);
   }
   return out;
 }

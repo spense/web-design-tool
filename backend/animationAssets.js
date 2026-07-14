@@ -87,7 +87,7 @@ export const ANIMATIONS_CSS = `/* cinder-anim */
 .parallax-bg::before {
   content: "";
   position: absolute;
-  inset: -15% 0;
+  inset: -20% 0;
   background-image: var(--cinder-pbg, none);
   background-size: cover;
   background-position: center;
@@ -232,28 +232,90 @@ export const ANIMATIONS_JS = `(function(){
     requestAnimationFrame(step);
   }
 
+  // Runtime state for each effect. PreviewPanel/export can flip these via
+  // setEffects(); a false flag tears down that effect and clears any DOM
+  // changes the runtime made.
+  var effectState = { fadeIn: true, reveal: true, parallax: true, sticky: true, countUp: true, marquee: true };
+
   // Parallax: collects .parallax-bg sections + [data-parallax] elements.
+  // Two flavors for .parallax-bg:
+  //   'bgPseudo'  — section has a CSS background-image; we lift it into a
+  //                 CSS var read by the ::before pseudo.
+  //   'directImg' — section instead uses a direct <img> child positioned to
+  //                 fill it (common hero pattern). We transform the img and
+  //                 oversize it so translation doesn't reveal empty space.
   var parallaxItems = [];
   function setupParallax(){
+    if (parallaxDisabled || !effectState.parallax) return;
     parallaxItems = [];
-    if (parallaxDisabled) return;
     document.querySelectorAll('.parallax-bg').forEach(function(sec){
       if (offBy(sec)) return;
-      // Lift the section's background-image into a CSS var the ::before reads.
       var bg = sec.style.backgroundImage || getComputedStyle(sec).backgroundImage;
       if (bg && bg !== 'none') {
+        // Save the original inline background-image so teardown can restore it.
+        var origBg = sec.style.backgroundImage || '';
         sec.style.setProperty('--cinder-pbg', bg);
-        // Hide the original so the pseudo-element shows alone.
         sec.style.backgroundImage = 'none';
+        parallaxItems.push({ el: sec, speed: 0.3, mode: 'bgPseudo', origBg: origBg });
+        return;
       }
-      parallaxItems.push({ el: sec, speed: 0.4, isBg: true });
+      // Look for a direct <img> child that's positioned to fill the section
+      // (the standard hero-image pattern). Skip inline/static imgs — those
+      // are content, not backgrounds.
+      var img = null;
+      var kids = sec.children;
+      for (var i = 0; i < kids.length; i++) {
+        if (kids[i].tagName === 'IMG') {
+          var cs = getComputedStyle(kids[i]);
+          if (cs.position === 'absolute' || cs.position === 'fixed') {
+            img = kids[i]; break;
+          }
+        }
+      }
+      if (img) {
+        // Snapshot the inline styles we're about to overwrite so teardown
+        // can fully restore the img (avoids a "zoomed hero" leftover when
+        // parallax is toggled off).
+        var orig = {
+          top: img.style.top,
+          bottom: img.style.bottom,
+          height: img.style.height,
+          willChange: img.style.willChange,
+          transform: img.style.transform,
+        };
+        img.style.top = '-20%';
+        img.style.bottom = '-20%';
+        img.style.height = '140%';
+        img.style.willChange = 'transform';
+        parallaxItems.push({ el: sec, node: img, speed: 0.3, mode: 'directImg', origImg: orig });
+      }
     });
     document.querySelectorAll('[data-parallax]').forEach(function(el){
       if (offBy(el)) return;
       var s = parseFloat(el.getAttribute('data-parallax'));
       if (!isFinite(s)) s = 0.7;
-      parallaxItems.push({ el: el, speed: 1 - s, isBg: false });
+      parallaxItems.push({ el: el, speed: 1 - s, mode: 'var' });
     });
+  }
+
+  function teardownParallax(){
+    for (var i = 0; i < parallaxItems.length; i++) {
+      var it = parallaxItems[i];
+      if (it.mode === 'directImg' && it.origImg) {
+        it.node.style.top = it.origImg.top;
+        it.node.style.bottom = it.origImg.bottom;
+        it.node.style.height = it.origImg.height;
+        it.node.style.willChange = it.origImg.willChange;
+        it.node.style.transform = it.origImg.transform;
+      } else if (it.mode === 'bgPseudo') {
+        it.el.style.backgroundImage = it.origBg || '';
+        it.el.style.removeProperty('--cinder-pbg');
+        it.el.style.removeProperty('--cinder-y');
+      } else {
+        it.el.style.removeProperty('--cinder-y');
+      }
+    }
+    parallaxItems = [];
   }
 
   var ticking = false;
@@ -265,7 +327,12 @@ export const ANIMATIONS_JS = `(function(){
       var r = it.el.getBoundingClientRect();
       var center = r.top + r.height / 2;
       var delta = (center - vh / 2) * it.speed;
-      it.el.style.setProperty('--cinder-y', (-delta).toFixed(1) + 'px');
+      var y = (-delta).toFixed(1) + 'px';
+      if (it.mode === 'directImg') {
+        it.node.style.transform = 'translate3d(0, ' + y + ', 0)';
+      } else {
+        it.el.style.setProperty('--cinder-y', y);
+      }
     }
   }
   function onScroll(){
@@ -302,7 +369,26 @@ export const ANIMATIONS_JS = `(function(){
     updateParallax();
   }
 
-  window.__cinderAnim = { refresh: refresh, observer: observer };
+  // Called by PreviewPanel/export-time script when the user flips a toggle.
+  // Handles teardown/re-setup for effects that can't be gated by CSS alone
+  // (currently just parallax; the other effects are CSS-neutralized via
+  // buildEffectOverrideCss on the outside).
+  function setEffects(next){
+    if (!next) return;
+    var prev = effectState;
+    var merged = {};
+    for (var k in prev) merged[k] = prev[k];
+    for (var k2 in next) if (typeof next[k2] === 'boolean') merged[k2] = next[k2];
+    effectState = merged;
+    if (prev.parallax && !effectState.parallax) {
+      teardownParallax();
+    } else if (!prev.parallax && effectState.parallax) {
+      setupParallax();
+      updateParallax();
+    }
+  }
+
+  window.__cinderAnim = { refresh: refresh, setEffects: setEffects, observer: observer };
 
   window.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', function(){ updateParallax(); }, { passive: true });
