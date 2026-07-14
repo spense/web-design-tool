@@ -429,41 +429,26 @@ Future-proofs against designs that adopt `<main>` wrappers or add hidden helpers
 
 ---
 
-## Design engine handoff
+## Custom code in exports
 
-The sibling **Web Design Engine** (`/Users/spenserlea/Sites/web-design-engine`) consumes exports from this tool and produces Astro builds. When a project has any custom code set, the export path writes a sidecar `siteCode.json` next to the HTML/CSS/assets, and the engine reads it directly rather than trying to regex-scrape code out of page bodies.
+User-authored code slots (**Global HEAD**, **Global FOOTER**, **Global CSS**, and **per-page HEAD / FOOTER**) are injected at runtime inside the preview iframe and are **also baked directly into the exported HTML** at export time — see `injectSiteCode` in `backend/routes/export.js`. Exports are self-contained: everything the user typed appears in the shipped `.html` files, no sidecar manifest.
 
-### Sidecar: `siteCode.json`
+Slot order (matches the preview's `applyCodeSlots`):
 
-Owned jointly by this tool and the design engine. Schema (all fields optional; the file is only written when at least one field is set):
+- **`<head>`**: `globalHead` → per-page `head` → `globalCss` (as a final `<style>` block). Global CSS lands last so it wins the cascade over any page-level styles.
+- **Before `</body>`**: `globalBodyEnd` → per-page `bodyEnd`. Globals first so per-page scripts can depend on them.
 
-```json
-{
-  "globalCss": "…",
-  "globalHead": "<link ...>\n<meta ...>",
-  "globalBodyEnd": "<script ...></script>",
-  "pages": {
-    "index":    { "head": "…", "bodyEnd": "…" },
-    "about-us": { "head": "…" }
-  }
-}
+Each region is wrapped in HTML comment markers so downstream consumers (e.g. the sibling **Web Design Engine** at `/Users/spenserlea/Sites/web-design-engine`, which converts these exports into an Astro build) can identify and preserve user regions when re-parsing/regenerating pages:
+
+```html
+<!-- site-code:global-head -->
+…user code…
+<!-- /site-code:global-head -->
 ```
 
-**Page slugs strip the `.html` suffix** so they map cleanly to Astro routes (`index.html` → `index`, `about-us.html` → `about-us`).
+Marker names: `global-head`, `page-head`, `global-css`, `global-body-end`, `page-body-end`.
 
-Built by `buildSiteCodeManifest` in `backend/routes/export.js`. Empty strings and empty per-page objects are dropped.
-
-### What the engine needs to do
-
-- **Global HEAD / FOOTER** — inject into the shared Astro layout so every page carries them.
-- **Global CSS** — inject as the final `<style>` in `<head>` (matches the preview's cascade order — it must win over any page-level styles).
-- **Per-page HEAD / FOOTER** — inject into the matching route's page component. When both global and per-page code are set, **global loads first** (scripts benefit from that order; per-page code can depend on globals being ready).
-
-### Rewriter contract
-
-The chat-driven code rewriter must **not** touch the sidecar fields during AI regenerations. They're user-authored and not model-visible. The model can generate a section that contains a scoped `<style>` or `<script>` — that's fine; it lives inside `pages.json` and flows through the normal export path.
-
-Section-scoped `<style>` and `<script>` blocks inside `pages.json` need no special engine handling: Astro renders them as-is inside the section. If the engine strips or hoists inline scripts as part of its build, it must preserve those inside sections.
+Section-scoped `<style>` and `<script>` blocks the user (or the model) drops into a section's markup live inside `pages.json` and flow through the normal HTML export path — no slot involved.
 
 ---
 

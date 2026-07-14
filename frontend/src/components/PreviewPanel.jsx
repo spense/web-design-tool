@@ -564,7 +564,11 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
 
   const openFullScreen = () => {
     if (!html) return;
-    const blob = new Blob([html], { type: 'text/html' });
+    // Bake user code slots (global HEAD/FOOTER/CSS, page HEAD/FOOTER) into the
+    // HTML before creating the blob so third-party embed scripts bootstrap
+    // during the initial parse — same layout as the export.
+    const baked = bakeSiteCode(html, project, activePage);
+    const blob = new Blob([baked], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const win = window.open(url, '_blank', 'noopener,noreferrer');
     // Revoke after the new tab has had time to load
@@ -1094,4 +1098,42 @@ function applyCodeSlots(doc, slots) {
       container.appendChild(toInsert);
     }
   }
+}
+
+// Inline the code slots into an HTML string. Used by the Full Screen popout
+// so the browser parses the user's code as part of the initial HTML load —
+// which is the only way most third-party embed scripts bootstrap correctly.
+// Mirrors backend/routes/export.js:injectSiteCode so popout and export
+// produce the same slot layout.
+function bakeSiteCode(html, project, pageName) {
+  const globalHead = String(project?.globalHead || '').trim();
+  const globalBodyEnd = String(project?.globalBodyEnd || '').trim();
+  const globalCss = String(project?.globalCss || '').trim();
+  const pageEntry = project?.pageCode?.[pageName] || {};
+  const pageHead = String(pageEntry.head || '').trim();
+  const pageBodyEnd = String(pageEntry.bodyEnd || '').trim();
+
+  const headParts = [];
+  if (globalHead) headParts.push(globalHead);
+  if (pageHead) headParts.push(pageHead);
+  if (globalCss) headParts.push(`<style>\n${globalCss}\n</style>`);
+
+  const bodyParts = [];
+  if (globalBodyEnd) bodyParts.push(globalBodyEnd);
+  if (pageBodyEnd) bodyParts.push(pageBodyEnd);
+
+  let result = html;
+  if (headParts.length) {
+    const block = '\n' + headParts.join('\n') + '\n';
+    result = /<\/head>/i.test(result)
+      ? result.replace(/<\/head>/i, `${block}</head>`)
+      : block + result;
+  }
+  if (bodyParts.length) {
+    const block = '\n' + bodyParts.join('\n') + '\n';
+    result = /<\/body>/i.test(result)
+      ? result.replace(/<\/body>/i, `${block}</body>`)
+      : result + block;
+  }
+  return result;
 }

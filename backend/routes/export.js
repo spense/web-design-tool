@@ -163,6 +163,14 @@ async function runExport(slug, project, pages, session) {
       }
     }
 
+    // User-authored code slots (global HEAD/FOOTER/CSS + per-page HEAD/FOOTER)
+    // are runtime-injected in the preview; bake them into the exported HTML
+    // here so the export is self-contained. Global CSS lands last in <head>
+    // so it wins the cascade — matches preview slot order.
+    for (const [name, html] of Object.entries(htmlFiles)) {
+      htmlFiles[name] = injectSiteCode(html, name, project);
+    }
+
     const allFiles = { ...htmlFiles, ...cssFiles };
 
     for (const [name, content] of Object.entries(allFiles)) {
@@ -205,20 +213,6 @@ async function runExport(slug, project, pages, session) {
     if (ogImageFile) {
       await fs.mkdir(exportAssetsDir, { recursive: true });
       await fs.copyFile(ogImageFile.src, path.join(exportAssetsDir, ogImageFile.exportName));
-    }
-
-    // Sidecar `siteCode.json` — user-authored code snippets injected into
-    // the preview. The design engine reads this to inject global/per-page
-    // HEAD, FOOTER, and CSS into Astro layouts/pages. Snippets never appear
-    // baked into the exported HTML: the design engine owns placement. Skip
-    // the write when nothing is set so empty exports stay clean.
-    const siteCode = buildSiteCodeManifest(project);
-    if (siteCode) {
-      await fs.writeFile(
-        path.join(exportDir, 'siteCode.json'),
-        JSON.stringify(siteCode, null, 2),
-        'utf8',
-      );
     }
 
     return {
@@ -343,48 +337,52 @@ function injectOgImageTag(html, ogTag) {
   return stripped;
 }
 
-// Build the export-time manifest of user-authored code snippets. Returns
-// null when nothing is set (caller skips writing the sidecar).
+// Bake user-authored code slots into a page's HTML at export time. Mirrors
+// the preview's runtime injection so the export is self-contained and
+// behaves identically to what the user sees in the tool.
 //
-// Schema (owned jointly with the design engine):
-//   {
-//     globalCss?: string,
-//     globalHead?: string,
-//     globalBodyEnd?: string,
-//     pages?: { [pageSlug]: { head?: string, bodyEnd?: string } }
-//   }
-// pageSlug strips the .html suffix so the engine can map directly to Astro
-// routes.
-function buildSiteCodeManifest(project) {
-  const globalCss = String(project?.globalCss || '').trim();
+// Slot order (matches PreviewPanel.applyCodeSlots):
+//   <head>: globalHead → pageHead → globalCss (last = wins cascade)
+//   <body> tail: globalBodyEnd → pageBodyEnd
+//
+// Wrapped in HTML comment markers so downstream consumers (like the design
+// engine's Astro build) can identify user-authored regions and preserve
+// them during AI-driven regenerations.
+function injectSiteCode(html, pageName, project) {
   const globalHead = String(project?.globalHead || '').trim();
   const globalBodyEnd = String(project?.globalBodyEnd || '').trim();
-  const pageCode = project?.pageCode && typeof project.pageCode === 'object' ? project.pageCode : null;
+  const globalCss = String(project?.globalCss || '').trim();
+  const pageEntry = project?.pageCode?.[pageName] || {};
+  const pageHead = String(pageEntry.head || '').trim();
+  const pageBodyEnd = String(pageEntry.bodyEnd || '').trim();
 
-  const pages = {};
-  if (pageCode) {
-    for (const [name, entry] of Object.entries(pageCode)) {
-      if (!entry || typeof entry !== 'object') continue;
-      const head = String(entry.head || '').trim();
-      const bodyEnd = String(entry.bodyEnd || '').trim();
-      if (!head && !bodyEnd) continue;
-      const slug = String(name).replace(/\.html?$/i, '');
-      pages[slug] = {};
-      if (head) pages[slug].head = head;
-      if (bodyEnd) pages[slug].bodyEnd = bodyEnd;
+  const headParts = [];
+  if (globalHead) headParts.push(`<!-- site-code:global-head -->\n${globalHead}\n<!-- /site-code:global-head -->`);
+  if (pageHead) headParts.push(`<!-- site-code:page-head -->\n${pageHead}\n<!-- /site-code:page-head -->`);
+  if (globalCss) headParts.push(`<!-- site-code:global-css -->\n<style>\n${globalCss}\n</style>\n<!-- /site-code:global-css -->`);
+
+  const bodyParts = [];
+  if (globalBodyEnd) bodyParts.push(`<!-- site-code:global-body-end -->\n${globalBodyEnd}\n<!-- /site-code:global-body-end -->`);
+  if (pageBodyEnd) bodyParts.push(`<!-- site-code:page-body-end -->\n${pageBodyEnd}\n<!-- /site-code:page-body-end -->`);
+
+  let result = html;
+  if (headParts.length) {
+    const block = '\n' + headParts.join('\n') + '\n';
+    if (/<\/head>/i.test(result)) {
+      result = result.replace(/<\/head>/i, `${block}</head>`);
+    } else {
+      result = block + result;
     }
   }
-
-  const hasGlobal = globalCss || globalHead || globalBodyEnd;
-  const hasPages = Object.keys(pages).length > 0;
-  if (!hasGlobal && !hasPages) return null;
-
-  const out = {};
-  if (globalCss) out.globalCss = globalCss;
-  if (globalHead) out.globalHead = globalHead;
-  if (globalBodyEnd) out.globalBodyEnd = globalBodyEnd;
-  if (hasPages) out.pages = pages;
-  return out;
+  if (bodyParts.length) {
+    const block = '\n' + bodyParts.join('\n') + '\n';
+    if (/<\/body>/i.test(result)) {
+      result = result.replace(/<\/body>/i, `${block}</body>`);
+    } else {
+      result = result + block;
+    }
+  }
+  return result;
 }
 
 export default router;
