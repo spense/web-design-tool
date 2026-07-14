@@ -17,6 +17,7 @@ import { DEFAULT_ANIMATIONS } from '../animations.js';
 import {
   getSelectorPath, fingerprintElement,
   getFlowRoot, getStructuralChildren, isStructuralTopLevel,
+  resolveSelectorPath,
 } from '../inlineEdit/selectionUtils.js';
 import { useInlineSelection } from '../inlineEdit/useInlineSelection.js';
 
@@ -846,21 +847,31 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 return;
               }
               if (actionId === 'edit-code') {
-                // Open the code panel with the element's outerHTML. On save,
-                // parse the new markup and replace the element in the source
-                // HTML through the same commitInlineEdit pipeline every other
-                // action uses. Multi-root paste is fine — replaceWith accepts
-                // any number of siblings.
+                // Open the code panel with the element's outerHTML as stored
+                // in the SAVED source HTML — NOT `el.outerHTML` from the live
+                // iframe DOM, which reflects runtime mutations (custom
+                // elements expanding into shadow trees, third-party widget
+                // hydration, devtools tweaks). The source string is our
+                // single source of truth. On save, parse the new markup and
+                // replace the element through the same commitInlineEdit
+                // pipeline every other action uses.
                 const el = chain[chainIndex];
                 if (!el || !selectorPath || !onOpenCodePanel) return;
                 const tag = el.tagName.toLowerCase();
                 const savedSelectorPath = selectorPath;
                 const savedActivePage = activePage;
+                const sourceHtml = pages?.[savedActivePage] || '';
+                const sourceDoc = new DOMParser().parseFromString(sourceHtml, 'text/html');
+                const sourceEl = resolveSelectorPath(savedSelectorPath, sourceDoc);
+                if (!sourceEl) {
+                  console.warn('[edit-code] could not resolve element in source HTML');
+                  return;
+                }
                 onOpenCodePanel({
                   key: `edit-code-${savedSelectorPath.join('.')}`,
                   title: `Edit <${tag}>`,
                   tabs: [
-                    { id: 'html', label: 'HTML', lang: 'html', value: el.outerHTML },
+                    { id: 'html', label: 'HTML', lang: 'html', value: sourceEl.outerHTML },
                   ],
                   onSave: (values) => {
                     const nextMarkup = values.html || '';
