@@ -856,28 +856,52 @@ export default function PreviewPanel({ pages, activePage, onActivePage, onExport
                 // replace the element through the same commitInlineEdit
                 // pipeline every other action uses.
                 const el = chain[chainIndex];
-                if (!el || !selectorPath || !onOpenCodePanel) return;
+                if (!el || !onOpenCodePanel) return;
                 const tag = el.tagName.toLowerCase();
-                const savedSelectorPath = selectorPath;
+                // Recompute the selector path from the LIVE element right now
+                // rather than trusting `selectorPath` state — the picker's
+                // onPick updates state via React setters, and if the user
+                // clicks Edit Code before the batched re-render commits, the
+                // closure could see a stale path from before the pick. Using
+                // the live element as the authoritative source removes that
+                // window entirely.
+                const liveDoc = el.ownerDocument;
+                const freshPath = liveDoc ? getSelectorPath(el, liveDoc) : null;
+                if (!freshPath) {
+                  console.warn('[edit-code] could not derive selector path from live element');
+                  return;
+                }
                 const savedActivePage = activePage;
                 const sourceHtml = pages?.[savedActivePage] || '';
                 const sourceDoc = new DOMParser().parseFromString(sourceHtml, 'text/html');
-                const sourceEl = resolveSelectorPath(savedSelectorPath, sourceDoc);
-                if (!sourceEl) {
-                  console.warn('[edit-code] could not resolve element in source HTML');
-                  return;
+                const sourceEl = resolveSelectorPath(freshPath, sourceDoc);
+                // Sanity check: source path must land on the same tag as the
+                // live element. If it doesn't, something drifted (a runtime
+                // injection shifted body indices, a stale DOM ref, etc.) —
+                // fall back to live outerHTML so the user at least sees the
+                // right section instead of an unrelated sibling.
+                let initialValue;
+                if (sourceEl && sourceEl.tagName === el.tagName) {
+                  initialValue = sourceEl.outerHTML;
+                } else {
+                  console.warn(
+                    '[edit-code] source path drift — live:', el.tagName,
+                    'source:', sourceEl?.tagName, 'path:', freshPath,
+                    '— falling back to live outerHTML',
+                  );
+                  initialValue = el.outerHTML;
                 }
                 onOpenCodePanel({
-                  key: `edit-code-${savedSelectorPath.join('.')}`,
+                  key: `edit-code-${freshPath.join('.')}`,
                   title: `Edit <${tag}>`,
                   tabs: [
-                    { id: 'html', label: 'HTML', lang: 'html', value: sourceEl.outerHTML },
+                    { id: 'html', label: 'HTML', lang: 'html', value: initialValue },
                   ],
                   onSave: (values) => {
                     const nextMarkup = values.html || '';
                     const newHtml = commitInlineEdit({
                       sourceHtml: pages?.[savedActivePage] || '',
-                      selectorPath: savedSelectorPath,
+                      selectorPath: freshPath,
                       mutator: (target, doc) => {
                         const tmpl = doc.createElement('template');
                         tmpl.innerHTML = nextMarkup;

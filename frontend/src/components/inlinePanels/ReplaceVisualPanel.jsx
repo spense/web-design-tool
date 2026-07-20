@@ -3,6 +3,7 @@ import Spinner from '../Spinner.jsx';
 import { api } from '../../api.js';
 import { classifyElement } from '../../inlineEdit/selectionUtils.js';
 import { sanitizeSvg } from '../../inlineEdit/svgSanitize.js';
+import { normalizeSvgToSource } from '../../inlineEdit/svgNormalize.js';
 
 // Replace visual: depending on the selected element we show different flows.
 //   <img> / element w/ background-image → Pixabay search + Upload file
@@ -182,9 +183,17 @@ function SvgFlow({ element, slug, onApply }) {
   const [uploadError, setUploadError] = useState(null);
   const [uploading, setUploading] = useState(false);
 
-  const applyMarkup = (markup) => {
+  // Whether to normalize uploaded/pasted SVGs to match the source's size,
+  // color, and stroke width. Doesn't apply to generated SVGs (the model
+  // already matches based on the current SVG in the prompt).
+  const [matchStyle, setMatchStyle] = useState(true);
+
+  const applyMarkup = (markup, { normalize = false } = {}) => {
     const result = sanitizeSvg(markup);
     if (!result.ok) return result;
+    if (normalize && element?.tagName?.toLowerCase() === 'svg') {
+      normalizeSvgToSource(result.svg, element);
+    }
     onApply({ kind: 'svg', markup: result.svg.outerHTML });
     return { ok: true };
   };
@@ -224,7 +233,7 @@ function SvgFlow({ element, slug, onApply }) {
     setUploadError(null);
     try {
       const text = await file.text();
-      const result = applyMarkup(text);
+      const result = applyMarkup(text, { normalize: matchStyle });
       if (!result.ok) setUploadError(result.error);
     } catch (e) {
       setUploadError(e.message || 'Upload failed');
@@ -235,7 +244,7 @@ function SvgFlow({ element, slug, onApply }) {
 
   const handlePasteApply = () => {
     setPastedError(null);
-    const result = applyMarkup(pasted);
+    const result = applyMarkup(pasted, { normalize: matchStyle });
     if (!result.ok) setPastedError(result.error);
   };
 
@@ -282,6 +291,15 @@ function SvgFlow({ element, slug, onApply }) {
           </>
         )}
       </div>
+
+      <label className="rv-match-style">
+        <input
+          type="checkbox"
+          checked={matchStyle}
+          onChange={(e) => setMatchStyle(e.target.checked)}
+        />
+        <span>Match original size, color, and stroke</span>
+      </label>
 
       <div className="panel-label">Or upload</div>
       <label className={`rv-upload ${uploading ? 'uploading' : ''}`}>
